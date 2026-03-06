@@ -4,7 +4,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, Find, Media, Track } from "../db";
 import { v4 as uuid } from "uuid";
-import { MapFilterBar } from "../components/MapFilterBar";
+import { MapFilterBar, LidarType } from "../components/MapFilterBar";
 import { PermissionPanel } from "../components/PermissionPanel";
 import { FindModal } from "../components/FindModal";
 import { PermissionQuickAddModal } from "../components/PermissionQuickAddModal";
@@ -45,23 +45,26 @@ export default function MapPage({ projectId }: { projectId: string }) {
   const [customFrom, setCustomFrom] = useState<string>("");
   const [customTo, setCustomTo] = useState<string>("");
   
-  // Map Style
-  const [mapStyleMode, setMapStyleMode] = useState<"streets" | "satellite" | "lidar">("streets");
+  // Map Style & LiDAR Overlay
+  const [mapStyleMode, setMapStyleMode] = useState<"streets" | "satellite">("streets");
+  const [showLidar, setShowLidar] = useState(false);
   const [showTracks, setShowTracks] = useState(true);
 
   // Load persistent style
   useEffect(() => {
     db.settings.get("mapStyle").then(s => {
-        if (s && ["streets", "satellite", "lidar"].includes(s.value)) {
-            setMapStyleMode(s.value);
+        if (s && ["streets", "satellite"].includes(s.value)) {
+            setMapStyleMode(s.value as any);
         }
     });
+    db.settings.get("showLidar").then(s => setShowLidar(!!s?.value));
   }, []);
 
   // Save persistent style
   useEffect(() => {
     db.settings.put({ key: "mapStyle", value: mapStyleMode });
-  }, [mapStyleMode]);
+    db.settings.put({ key: "showLidar", value: showLidar });
+  }, [mapStyleMode, showLidar]);
 
   // Selection / modals
   const [selected, setSelected] = useState<SelectedPermission | null>(null);
@@ -231,85 +234,102 @@ export default function MapPage({ projectId }: { projectId: string }) {
         layers: []
     };
 
-    if (mapStyleMode === "lidar") {
-        // Source 1: Esri World Hillshade (Global base/fallback)
-        style.sources["esri-lidar"] = {
+    // 1. THE BONE BASE (Solid Terrain) - 100% Opaque
+    if (showLidar) {
+        // Global Fallback
+        style.sources["esri-lidar-base"] = {
             type: "raster",
             tiles: ["https://services.arcgisonline.com/arcgis/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}"],
             tileSize: 256,
             attribution: "© Esri Hillshade",
             maxzoom: 19
         };
-        // Source 2: Environment Agency 1m DTM Hillshade (Extreme UK detail)
-        style.sources["ea-lidar"] = {
-            type: "raster",
-            tiles: ["https://environment.data.gov.uk/arcgis/rest/services/Public/LIDAR_Composite_DTM_1m_Hillshade/MapServer/tile/{z}/{y}/{x}"],
-            tileSize: 256,
-            attribution: "© Environment Agency (LiDAR 1m)",
-            maxzoom: 20
-        };
-
-        // Layer 1: Base hillshade (lighter, provides context)
         style.layers.push({
-            id: "esri-layer",
+            id: "lidar-fallback-layer",
             type: "raster",
-            source: "esri-lidar",
+            source: "esri-lidar-base",
             paint: { 
                 "raster-contrast": 0.2,
-                "raster-brightness-max": 0.8
-            }
-        });
-        // Layer 2: High-detail LiDAR (Extreme contrast)
-        style.layers.push({
-            id: "ea-layer",
-            type: "raster",
-            source: "ea-lidar",
-            paint: { 
-                "raster-contrast": 1.0,      
-                "raster-brightness-min": 0.05, 
-                "raster-brightness-max": 0.25, // Extremely dark highlights to force detail out
+                "raster-brightness-max": 0.9,
                 "raster-fade-duration": 0
             }
         });
-        // Layer 3: Overdrive layer (Doubles the shadow/ridge detail)
-        style.layers.push({
-            id: "ea-layer-boost",
-            type: "raster",
-            source: "ea-lidar",
-            paint: { 
-                "raster-contrast": 1.0,
-                "raster-brightness-max": 0.2,
-                "raster-opacity": 0.5,        // 50% opacity boost
-                "raster-fade-duration": 0
-            }
-        });
-    } else {
-        let tiles: string[] = [];
-        let attribution = "";
-        let maxZoom = 22;
 
-        if (mapStyleMode === "streets") {
-            tiles = ["https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"];
-            attribution = "© OpenStreetMap";
-        } else if (mapStyleMode === "satellite") {
-            tiles = ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"];
-            attribution = "© Esri World Imagery";
-        }
-
-        style.sources[`raster-tiles-${mapStyleMode}`] = {
+        // High-Detail EA LiDAR (Solid Relief)
+        style.sources["ea-lidar-detail"] = {
             type: "raster",
-            tiles: tiles,
+            tiles: ["https://services.arcgis.com/JJT1S6cy9mS999Xy/arcgis/rest/services/LIDAR_Composite_1m_DTM_2025_Hillshade/MapServer/tile/{z}/{y}/{x}"],
             tileSize: 256,
-            attribution: attribution,
-            minzoom: 0,
-            maxzoom: maxZoom
+            attribution: "© Environment Agency",
+            maxzoom: 20
         };
-
         style.layers.push({
-            id: `raster-layer-${mapStyleMode}`,
+            id: "lidar-detail-layer",
             type: "raster",
-            source: `raster-tiles-${mapStyleMode}`,
-            paint: { "raster-fade-duration": 0 }
+            source: "ea-lidar-detail",
+            paint: { 
+                "raster-opacity": 1.0,
+                "raster-contrast": 0.4,      
+                "raster-brightness-min": 0.0, 
+                "raster-brightness-max": 0.9,
+                "raster-fade-duration": 0
+            }
+        });
+
+        // SLOPE OVERDRIVE (The "Feature Punch")
+        style.layers.push({
+            id: "lidar-slope-punch",
+            type: "raster",
+            source: "ea-lidar-detail",
+            paint: { 
+                "raster-opacity": 0.5,
+                "raster-contrast": 0.8,      // Softened from 1.5 to avoid blacking out
+                "raster-brightness-max": 0.5, // Brighter shadows
+                "raster-fade-duration": 0
+            }
+        });
+    }
+
+    // 2. THE SKIN (Basemap) - Very transparent when LiDAR is ON to reveal features
+    let baseTiles: string[] = [];
+    let baseAttribution = "";
+    if (mapStyleMode === "streets") {
+        baseTiles = ["https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"];
+        baseAttribution = "© OpenStreetMap";
+    } else {
+        baseTiles = ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"];
+        baseAttribution = "© Esri World Imagery";
+    }
+
+    style.sources["base-raster"] = {
+        type: "raster",
+        tiles: baseTiles,
+        tileSize: 256,
+        attribution: baseAttribution,
+        maxzoom: 22
+    };
+
+    style.layers.push({
+        id: "base-layer",
+        type: "raster",
+        source: "base-raster",
+        paint: { 
+            "raster-fade-duration": 0,
+            "raster-opacity": showLidar ? 0.3 : 1.0 // 30% Skin over LiDAR for extreme visibility
+        }
+    });
+
+    // 3. Subtle Elevation Tint
+    if (showLidar) {
+        style.layers.push({
+            id: "ea-elevation-tint",
+            type: "raster",
+            source: "ea-lidar-detail",
+            paint: { 
+                "raster-opacity": 0.2,
+                "raster-hue-rotate": 140, 
+                "raster-contrast": 0.2
+            }
         });
     }
 
@@ -488,7 +508,7 @@ export default function MapPage({ projectId }: { projectId: string }) {
       map.remove();
       mapRef.current = null;
     };
-  }, [mapStyleMode]); // ONLY style changes trigger re-init
+  }, [mapStyleMode, showLidar]); // ONLY style changes trigger re-init
 
   // Data Updates
   useEffect(() => {
@@ -617,6 +637,8 @@ export default function MapPage({ projectId }: { projectId: string }) {
         needsKey={false}
         mapStyleMode={mapStyleMode}
         setMapStyleMode={setMapStyleMode}
+        showLidar={showLidar}
+        setShowLidar={setShowLidar}
         showTracks={showTracks}
         setShowTracks={setShowTracks}
       />

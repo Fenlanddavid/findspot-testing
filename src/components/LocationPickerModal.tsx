@@ -20,21 +20,24 @@ export function LocationPickerModal(props: {
     const [lat, setLat] = useState(props.initialLat || 54.5);
     const [lon, setLon] = useState(props.initialLon || -2.0);
     const [zoom] = useState(props.initialLat ? 16 : 6);
-    const [mapStyle, setMapStyle] = useState<"streets" | "satellite" | "lidar">("streets");
+    const [mapStyle, setMapStyle] = useState<"streets" | "satellite">("streets");
+    const [showLidar, setShowLidar] = useState(false);
     
     // Load persistent style
     useEffect(() => {
         db.settings.get("mapStyle").then(s => {
-            if (s && ["streets", "satellite", "lidar"].includes(s.value)) {
-                setMapStyle(s.value);
+            if (s && ["streets", "satellite"].includes(s.value)) {
+                setMapStyle(s.value as any);
             }
         });
+        db.settings.get("showLidar").then(s => setShowLidar(!!s?.value));
     }, []);
 
     // Save persistent style
     useEffect(() => {
         db.settings.put({ key: "mapStyle", value: mapStyle });
-    }, [mapStyle]);
+        db.settings.put({ key: "showLidar", value: showLidar });
+    }, [mapStyle, showLidar]);
   
     useEffect(() => {
       if (!mapDivRef.current) return;
@@ -45,85 +48,101 @@ export function LocationPickerModal(props: {
           layers: []
       };
 
-      if (mapStyle === "lidar") {
-          // Source 1: Esri World Hillshade (Global base/fallback)
-          style.sources["esri-lidar"] = {
+      // 1. THE BONE BASE (Solid Terrain) - 100% Opaque
+      if (showLidar) {
+          // Global Fallback
+          style.sources["esri-lidar-base"] = {
               type: "raster",
               tiles: ["https://services.arcgisonline.com/arcgis/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}"],
               tileSize: 256,
               attribution: "© Esri Hillshade",
               maxzoom: 19
           };
-          // Source 2: Environment Agency 1m DTM Hillshade (Extreme UK detail)
-          style.sources["ea-lidar"] = {
-              type: "raster",
-              tiles: ["https://environment.data.gov.uk/arcgis/rest/services/Public/LIDAR_Composite_DTM_1m_Hillshade/MapServer/tile/{z}/{y}/{x}"],
-              tileSize: 256,
-              attribution: "© Environment Agency (LiDAR 1m)",
-              maxzoom: 20
-          };
-
-          // Layer 1: Base hillshade (lighter, provides context)
           style.layers.push({
-              id: "esri-layer",
+              id: "lidar-fallback-layer",
               type: "raster",
-              source: "esri-lidar",
+              source: "esri-lidar-base",
               paint: { 
                   "raster-contrast": 0.2,
-                  "raster-brightness-max": 0.8
-              }
-          });
-          // Layer 2: High-detail LiDAR (Extreme contrast)
-          style.layers.push({
-              id: "ea-layer",
-              type: "raster",
-              source: "ea-lidar",
-              paint: { 
-                  "raster-contrast": 1.0,      
-                  "raster-brightness-min": 0.05, 
-                  "raster-brightness-max": 0.25, // Extremely dark highlights
+                  "raster-brightness-max": 0.9,
                   "raster-fade-duration": 0
               }
           });
-          // Layer 3: Overdrive layer (Doubles the shadow/ridge detail)
-          style.layers.push({
-              id: "ea-layer-boost",
-              type: "raster",
-              source: "ea-lidar",
-              paint: { 
-                  "raster-contrast": 1.0,
-                  "raster-brightness-max": 0.2,
-                  "raster-opacity": 0.5,        // 50% opacity boost
-                  "raster-fade-duration": 0
-              }
-          });
-      } else {
-          let tiles: string[] = [];
-          let attribution = "";
-          let maxZoom = 22;
 
-          if (mapStyle === "streets") {
-              tiles = ["https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"];
-              attribution = "© OpenStreetMap";
-          } else if (mapStyle === "satellite") {
-              tiles = ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"];
-              attribution = "© Esri World Imagery";
-          }
-
-          style.sources[`raster-tiles-${mapStyle}`] = {
+          // High-Detail EA LiDAR
+          style.sources["ea-lidar-detail"] = {
               type: "raster",
-              tiles: tiles,
+              tiles: ["https://services.arcgis.com/JJT1S6cy9mS999Xy/arcgis/rest/services/LIDAR_Composite_1m_DTM_2025_Hillshade/MapServer/tile/{z}/{y}/{x}"],
               tileSize: 256,
-              attribution: attribution,
-              minzoom: 0,
-              maxzoom: maxZoom
+              attribution: "© Environment Agency",
+              maxzoom: 20
           };
-
           style.layers.push({
-              id: `raster-layer-${mapStyle}`,
+              id: "lidar-detail-layer",
               type: "raster",
-              source: `raster-tiles-${mapStyle}`,
-              paint: { "raster-fade-duration": 0 }
+              source: "ea-lidar-detail",
+              paint: { 
+                  "raster-opacity": 1.0,
+                  "raster-contrast": 0.4,      
+                  "raster-brightness-max": 0.9,
+                  "raster-fade-duration": 0
+              }
+          });
+          
+          // SLOPE OVERDRIVE
+          style.layers.push({
+            id: "lidar-slope-punch",
+            type: "raster",
+            source: "ea-lidar-detail",
+            paint: { 
+                "raster-opacity": 0.5,
+                "raster-contrast": 0.8,
+                "raster-brightness-max": 0.5,
+                "raster-fade-duration": 0
+            }
+          });
+      }
+
+      // 2. THE SKIN (Basemap) - Transparent when LiDAR is ON
+      let baseTiles: string[] = [];
+      let baseAttribution = "";
+      if (mapStyle === "streets") {
+          baseTiles = ["https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"];
+          baseAttribution = "© OpenStreetMap";
+      } else {
+          baseTiles = ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"];
+          baseAttribution = "© Esri World Imagery";
+      }
+
+      style.sources["base-raster"] = {
+          type: "raster",
+          tiles: baseTiles,
+          tileSize: 256,
+          attribution: baseAttribution,
+          maxzoom: 22
+      };
+
+      style.layers.push({
+          id: "base-layer",
+          type: "raster",
+          source: "base-raster",
+          paint: { 
+              "raster-fade-duration": 0,
+              "raster-opacity": showLidar ? 0.3 : 1.0 // 30% Basemap skin for extreme visibility
+          }
+      });
+
+      // 3. Subtle Elevation Tint
+      if (showLidar) {
+          style.layers.push({
+            id: "ea-elevation-tint",
+            type: "raster",
+            source: "ea-lidar-detail",
+            paint: { 
+                "raster-opacity": 0.15,
+                "raster-hue-rotate": 140,
+                "raster-contrast": 0.1
+            }
           });
       }
   
@@ -173,7 +192,7 @@ export function LocationPickerModal(props: {
     markerRef.current = marker;
 
     return () => map.remove();
-  }, [mapStyle]);
+  }, [mapStyle, showLidar]);
 
   return (
     <Modal title="Pick Findspot Location" onClose={props.onClose}>
@@ -181,25 +200,35 @@ export function LocationPickerModal(props: {
         <div className="h-[60vh] rounded-2xl overflow-hidden border-2 border-gray-100 dark:border-gray-800 relative shadow-inner bg-gray-50 dark:bg-black">
           <div ref={mapDivRef} className="absolute inset-0" />
           
-          <div className="absolute top-2 left-2 z-10 flex gap-1 bg-white/90 dark:bg-gray-900/90 p-1 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
-            <button 
-                onClick={() => setMapStyle("streets")}
-                className={`px-2 py-1 text-[10px] font-bold rounded ${mapStyle === "streets" ? "bg-emerald-600 text-white" : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"}`}
-            >
-                Streets
-            </button>
-            <button 
-                onClick={() => setMapStyle("satellite")}
-                className={`px-2 py-1 text-[10px] font-bold rounded ${mapStyle === "satellite" ? "bg-emerald-600 text-white" : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"}`}
-            >
-                Satellite
-            </button>
-            <button 
-                onClick={() => setMapStyle("lidar")}
-                className={`px-2 py-1 text-[10px] font-bold rounded ${mapStyle === "lidar" ? "bg-emerald-600 text-white" : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"}`}
-            >
-                LiDAR
-            </button>
+          <div className="absolute top-2 left-2 z-10 flex flex-col gap-2">
+            <div className="flex gap-1 bg-white/90 dark:bg-gray-900/90 p-1 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
+                <button 
+                    onClick={() => setMapStyle("streets")}
+                    className={`px-2 py-1 text-[10px] font-bold rounded ${mapStyle === "streets" ? "bg-emerald-600 text-white" : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"}`}
+                >
+                    Streets
+                </button>
+                <button 
+                    onClick={() => setMapStyle("satellite")}
+                    className={`px-2 py-1 text-[10px] font-bold rounded ${mapStyle === "satellite" ? "bg-emerald-600 text-white" : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"}`}
+                >
+                    Satellite
+                </button>
+            </div>
+
+            <div className="flex items-center gap-1 bg-emerald-50/90 dark:bg-emerald-900/90 p-1 rounded-lg shadow-sm border border-emerald-200 dark:border-emerald-800">
+                <button 
+                    onClick={() => setShowLidar(!showLidar)}
+                    className={`px-2 py-1 text-[10px] font-bold rounded whitespace-nowrap ${showLidar ? "bg-emerald-600 text-white" : "text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-800"}`}
+                >
+                    {showLidar ? "LiDAR ON" : "LiDAR OFF"}
+                </button>
+                {showLidar && mapStyle === "satellite" && (
+                    <span className="text-[8px] text-emerald-800 dark:text-emerald-200 opacity-60 italic px-2 border-l border-emerald-200 dark:border-emerald-800">
+                        Tip: Best in Streets
+                    </span>
+                )}
+            </div>
           </div>
 
           <div className="absolute bottom-2 left-2 right-2 bg-white/90 dark:bg-gray-900/90 p-2 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 text-center pointer-events-none">
