@@ -54,7 +54,7 @@ export function calculateCoverage(boundary: any, tracks: any[], coilWidthM: numb
         const bufferRadiusM = Math.max(1.0, coilWidthM / 2);
         
         const bufferedSegments = validTracks.map(t => {
-            const line = turf.lineString(t.points.map(p => [p.lon, p.lat]));
+            const line = turf.lineString(t.points.map((p: any) => [p.lon, p.lat]));
             const simplified = turf.simplify(line, { tolerance: 0.000001, highQuality: false });
             return turf.buffer(simplified, bufferRadiusM / 1000, { units: "kilometers" });
         }).filter(Boolean);
@@ -70,7 +70,7 @@ export function calculateCoverage(boundary: any, tracks: any[], coilWidthM: numb
         }
 
         // Union all tracks into one "Detected Area"
-        let combinedDetected = bufferedSegments.length === 1 
+        let combinedDetected: any = bufferedSegments.length === 1 
             ? bufferedSegments[0] 
             : turf.union(turf.featureCollection(bufferedSegments as any));
 
@@ -78,7 +78,7 @@ export function calculateCoverage(boundary: any, tracks: any[], coilWidthM: numb
         combinedDetected = turf.rewind(combinedDetected);
 
         // 4. Find Intersection (Actual coverage within boundary)
-        const detectedInsideField = turf.intersect(turf.featureCollection([fieldPolygon, combinedDetected]));
+        const detectedInsideField: any = turf.intersect(turf.featureCollection([fieldPolygon, combinedDetected]));
 
         if (!detectedInsideField) {
             return {
@@ -94,7 +94,7 @@ export function calculateCoverage(boundary: any, tracks: any[], coilWidthM: numb
         const percentCovered = (detectedAreaM2 / totalAreaM2) * 100;
 
         // 5. Calculate Gaps (Field - Detected Area)
-        const diff = turf.difference(turf.featureCollection([fieldPolygon, detectedInsideField]));
+        const diff: any = turf.difference(turf.featureCollection([fieldPolygon, detectedInsideField]));
 
         let gaps: any[] = [];
         if (diff) {
