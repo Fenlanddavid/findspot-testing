@@ -44,14 +44,16 @@ export default function Home(props: {
 
       return Promise.all(rows.map(async (p) => {
         const fields = await db.fields.where("permissionId").equals(p.id).toArray();
+        const sessions = await db.sessions.where("permissionId").equals(p.id).toArray();
+        const sessionIds = new Set(sessions.map(s => s.id));
+        const permissionTracks = allTracks.filter(t => t.sessionId && sessionIds.has(t.sessionId));
         
         let totalAreaM2 = 0;
         let totalDetectedM2 = 0;
 
         for (const f of fields) {
-            const sessions = await db.sessions.where("fieldId").equals(f.id).toArray();
-            const sessionIds = sessions.map(s => s.id);
-            const fieldTracks = allTracks.filter(t => t.sessionId && sessionIds.includes(t.sessionId));
+            const fieldSessionIds = sessions.filter(s => s.fieldId === f.id).map(s => s.id);
+            const fieldTracks = permissionTracks.filter(t => t.sessionId && fieldSessionIds.includes(t.sessionId));
             const result = calculateCoverage(f.boundary, fieldTracks);
             if (result) {
                 totalAreaM2 += result.totalAreaM2;
@@ -81,7 +83,7 @@ export default function Home(props: {
             }
         }
 
-        return { ...p, lat, lon, fields, cumulativePercent };
+        return { ...p, lat, lon, fields, cumulativePercent, tracks: permissionTracks };
       }));
     },
     [props.projectId, searchQuery]
@@ -196,6 +198,7 @@ export default function Home(props: {
                         lat={l.lat} 
                         lon={l.lon} 
                         boundary={l.boundary || (l as any).fields?.[0]?.boundary} 
+                        tracks={(l as any).tracks}
                         className="h-full w-full rounded-none" 
                     />
                     

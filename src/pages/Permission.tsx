@@ -164,9 +164,14 @@ export default function PermissionPage(props: {
     Promise.all(fIds.map(async (fId) => {
         const field = await db.fields.get(fId);
         if (!field) return null;
+        
+        // Find all sessions for THIS specific field
         const sessions = await db.sessions.where("fieldId").equals(fId).toArray();
-        const sessionIds = sessions.map(s => s.id);
-        const fieldTracks = (allTracks ?? []).filter(t => t.sessionId && sessionIds.includes(t.sessionId));
+        const sessionIds = new Set(sessions.map(s => s.id));
+        
+        // Filter allTracks (which already belong to this permission) for those in this field's sessions
+        const fieldTracks = (allTracks ?? []).filter(t => t.sessionId && sessionIds.has(t.sessionId));
+        
         const result = calculateCoverage(field.boundary, fieldTracks);
         return { fId, result };
     })).then(results => {

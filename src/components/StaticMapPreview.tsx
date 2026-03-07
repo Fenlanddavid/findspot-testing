@@ -4,7 +4,7 @@ import React, { useMemo, useState } from "react";
  * A robust satellite/street snapshot component.
  * It uses a layered approach to ensure SOMETHING is always displayed.
  */
-export function StaticMapPreview({ lat, lon, boundary, className = "" }: { lat?: number | null, lon?: number | null, boundary?: any, className?: string }) {
+export function StaticMapPreview({ lat, lon, boundary, tracks, className = "" }: { lat?: number | null, lon?: number | null, boundary?: any, tracks?: any[], className?: string }) {
     const [hasError, setHasError] = useState(false);
     const zoom = 15;
 
@@ -23,22 +23,40 @@ export function StaticMapPreview({ lat, lon, boundary, className = "" }: { lat?:
         ? `https://a.tile.openstreetmap.org/${zoom}/${tileX}/${tileY}.png`
         : "";
 
-    // SVG Projection Logic
+    // SVG Projection Logic for Boundary
     const svgPath = useMemo(() => {
-        if (!isValid || !boundary || boundary.type !== "Polygon" || !boundary.coordinates?.[0]) return null;
+        if (!isValid || !boundary || (boundary.type !== "Polygon" && boundary.type !== "MultiPolygon")) return null;
         
         try {
-            const coords = boundary.coordinates[0];
-            const points = coords.map((p: [number, number]) => {
-                const x = (lonToTileFloat(p[0], zoom) - tileX) * 256;
-                const y = (latToTileFloat(p[1], zoom) - tileY) * 256;
-                return `${x},${y}`;
+            // Handle both Polygon and MultiPolygon
+            const polygons = boundary.type === "Polygon" ? [boundary.coordinates] : boundary.coordinates;
+            
+            return polygons.map((poly: any) => {
+                const coords = poly[0]; // Exterior ring
+                return coords.map((p: [number, number]) => {
+                    const x = (lonToTileFloat(p[0], zoom) - tileX) * 256;
+                    const y = (latToTileFloat(p[1], zoom) - tileY) * 256;
+                    return `${x},${y}`;
+                }).join(" ");
             });
-            return points.join(" ");
         } catch (e) {
             return null;
         }
     }, [boundary, tileX, tileY, zoom, isValid]);
+
+    // SVG Projection Logic for Tracks
+    const svgTracks = useMemo(() => {
+        if (!isValid || !tracks || tracks.length === 0) return [];
+        
+        return tracks.map(t => {
+            const points = (t.points || []).map((p: any) => {
+                const x = (lonToTileFloat(p.lon, zoom) - tileX) * 256;
+                const y = (latToTileFloat(p.lat, zoom) - tileY) * 256;
+                return `${x},${y}`;
+            }).join(" ");
+            return { points, color: t.color || "#10b981" };
+        }).filter(t => t.points.length > 0);
+    }, [tracks, tileX, tileY, zoom, isValid]);
 
     if (!isValid) {
         return (
@@ -59,25 +77,41 @@ export function StaticMapPreview({ lat, lon, boundary, className = "" }: { lat?:
                 loading="lazy"
             />
             
-            {/* Boundary Overlay */}
-            {svgPath && (
-                <svg 
-                    viewBox="0 0 256 256" 
-                    className="absolute inset-0 w-full h-full pointer-events-none"
-                    preserveAspectRatio="xMidYMid slice"
-                >
+            {/* SVG Overlay for Boundary and Tracks */}
+            <svg 
+                viewBox="0 0 256 256" 
+                className="absolute inset-0 w-full h-full pointer-events-none"
+                preserveAspectRatio="xMidYMid slice"
+            >
+                {/* Boundary */}
+                {svgPath && svgPath.map((path: string, i: number) => (
                     <polygon 
-                        points={svgPath} 
+                        key={`poly-${i}`}
+                        points={path} 
                         fill="rgba(16, 185, 129, 0.25)" 
                         stroke="#10b981" 
                         strokeWidth="3" 
                         strokeDasharray="6,3"
                     />
-                </svg>
-            )}
+                ))}
 
-            {/* Simple Marker if no boundary */}
-            {!svgPath && (
+                {/* Tracks */}
+                {svgTracks.map((t, i) => (
+                    <polyline 
+                        key={`track-${i}`}
+                        points={t.points}
+                        fill="none"
+                        stroke={t.color}
+                        strokeWidth="4"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeOpacity="0.8"
+                    />
+                ))}
+            </svg>
+
+            {/* Simple Marker if no boundary or tracks */}
+            {!svgPath && svgTracks.length === 0 && (
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                     <div className="w-6 h-6 border-2 border-emerald-500/40 rounded-full animate-pulse flex items-center justify-center">
                         <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
