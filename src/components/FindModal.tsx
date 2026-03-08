@@ -59,7 +59,7 @@ export function FindModal(props: { findId: string; onClose: () => void }) {
       
       const filename = `findspot-${draft.findCode || 'find'}`;
       const title = `FindSpot: ${draft.objectType}`;
-      const text = `Look what I found using FindSpot! ${draft.objectType} ${draft.ruler ? `(${draft.ruler})` : ''}`;
+      const text = `Today's best find`;
       
       await shareElementAsImage(shareCardRef.current, filename, title, text);
     } finally {

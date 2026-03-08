@@ -120,7 +120,7 @@ export default function SessionPage(props: {
       await new Promise(r => setTimeout(r, 100));
       const filename = `findspot-session-${new Date().toISOString().split('T')[0]}`;
       const title = `FindSpot Session: ${permission.name}`;
-      const text = `Great day detecting at ${permission.name}! Found ${finds?.length || 0} items. #findspot`;
+      const text = `Today's detecting session`;
       await shareElementAsImage(shareCardRef.current, filename, title, text);
     } finally {
       setSaving(false);
