@@ -8,8 +8,6 @@ import { FindRow } from "../components/FindRow";
 import { FindModal } from "../components/FindModal";
 import { startTracking, stopTracking, isTrackingActive, getCurrentTrackId } from "../services/tracking";
 import { calculateCoverage, CoverageResult } from "../services/coverage";
-import { ShareCard } from "../components/ShareCard";
-import { shareElementAsImage } from "../services/share";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
@@ -106,26 +104,6 @@ export default function SessionPage(props: {
 
   const mapDivRef = React.useRef<HTMLDivElement | null>(null);
   const mapRef = React.useRef<maplibregl.Map | null>(null);
-  const shareCardRef = React.useRef<HTMLDivElement>(null);
-
-  const bestFind = useMemo(() => {
-    if (!finds) return null;
-    return finds.find(f => f.isFavorite) || finds[0] || null;
-  }, [finds]);
-
-  async function handleShare() {
-    if (!shareCardRef.current || !permission) return;
-    setSaving(true);
-    try {
-      await new Promise(r => setTimeout(r, 100));
-      const filename = `findspot-session-${new Date().toISOString().split('T')[0]}`;
-      const title = `FindSpot Session: ${permission.name}`;
-      const text = `Today's detecting session`;
-      await shareElementAsImage(shareCardRef.current, filename, title, text);
-    } finally {
-      setSaving(false);
-    }
-  }
 
   useEffect(() => {
     const boundary = selectedField?.boundary || (permission as any)?.boundary;
@@ -464,22 +442,13 @@ export default function SessionPage(props: {
             </div>
             <div className="flex gap-2 w-full sm:w-auto">
                 {isEdit && (
-                    <>
-                        <button 
-                            onClick={handleShare}
-                            disabled={saving}
-                            className="text-xs sm:text-sm font-bold text-emerald-600 hover:text-white hover:bg-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 px-3 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800 transition-all disabled:opacity-50 flex items-center gap-1"
-                        >
-                            <span>📤</span> Post Session
-                        </button>
-                        <button 
-                            onClick={handleDelete}
-                            disabled={saving}
-                            className="text-xs sm:text-sm font-bold text-red-600 hover:text-white hover:bg-red-600 bg-red-50 dark:bg-red-900/20 px-3 py-1 rounded-lg border border-red-200 dark:border-red-800 transition-all disabled:opacity-50 flex-1 sm:flex-none"
-                        >
-                            Delete
-                        </button>
-                    </>
+                    <button 
+                        onClick={handleDelete}
+                        disabled={saving}
+                        className="text-xs sm:text-sm font-bold text-red-600 hover:text-white hover:bg-red-600 bg-red-50 dark:bg-red-900/20 px-3 py-1 rounded-lg border border-red-200 dark:border-red-800 transition-all disabled:opacity-50 flex-1 sm:flex-none"
+                    >
+                        Delete
+                    </button>
                 )}
                 <button onClick={() => nav(permission ? `/permission/${permission.id}` : "/")} className="text-xs sm:text-sm font-medium text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 bg-gray-50 dark:bg-gray-800 px-3 py-1 rounded-lg border border-gray-200 dark:border-gray-700 transition-colors flex-1 sm:flex-none">Back</button>
             </div>
@@ -759,29 +728,6 @@ export default function SessionPage(props: {
         </div>
       </div>
       {openFindId && <FindModal findId={openFindId} onClose={() => setOpenFindId(null)} />}
-
-      {/* Off-screen ShareCard for session summary */}
-      {isEdit && permission && (
-        <div style={{ position: 'fixed', top: '-2000px', left: '-2000px', opacity: 0, pointerEvents: 'none' }}>
-            <ShareCard 
-                ref={shareCardRef}
-                type="session"
-                session={{
-                    id: sessionId,
-                    projectId: props.projectId,
-                    permissionId: permission.id,
-                    fieldId,
-                    date: new Date(date).toISOString(),
-                    lat, lon, gpsAccuracyM: acc,
-                    landUse, cropType, isStubble, notes, isFinished,
-                    createdAt: '', updatedAt: ''
-                }}
-                permission={permission}
-                findsCount={finds?.length || 0}
-                bestFindName={bestFind?.objectType}
-            />
-        </div>
-      )}
     </div>
   );
 }
