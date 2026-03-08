@@ -10,6 +10,8 @@ import { ScaledImage } from "./ScaledImage";
 import { FindReport } from "./FindReport";
 import { getSetting } from "../services/data";
 import { LocationPickerModal } from "./LocationPickerModal";
+import { ShareCard } from "./ShareCard";
+import { shareElementAsImage } from "../services/share";
 
 export function FindModal(props: { findId: string; onClose: () => void }) {
   const find = useLiveQuery(async () => db.finds.get(props.findId), [props.findId]);
@@ -29,6 +31,8 @@ export function FindModal(props: { findId: string; onClose: () => void }) {
   const [detectoristEmail, setDetectoristEmail] = useState("");
   const [detectorList, setDetectorList] = useState<string[]>([]);
 
+  const shareCardRef = React.useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     if (find) {
       setDraft(find);
@@ -44,6 +48,23 @@ export function FindModal(props: { findId: string; onClose: () => void }) {
 
   function handlePrint() {
     window.print();
+  }
+
+  async function handleShare() {
+    if (!shareCardRef.current || !draft) return;
+    setBusy(true);
+    try {
+      // Small delay to ensure everything is rendered
+      await new Promise(r => setTimeout(r, 100));
+      
+      const filename = `findspot-${draft.findCode || 'find'}`;
+      const title = `FindSpot: ${draft.objectType}`;
+      const text = `Look what I found using FindSpot! ${draft.objectType} ${draft.ruler ? `(${draft.ruler})` : ''}`;
+      
+      await shareElementAsImage(shareCardRef.current, filename, title, text);
+    } finally {
+      setBusy(false);
+    }
   }
 
   const imageUrls = useMemo(() => {
@@ -173,6 +194,13 @@ export function FindModal(props: { findId: string; onClose: () => void }) {
               <span className="text-sm leading-none">{draft.isFavorite ? '⭐' : '☆'}</span>
             </button>
             <button 
+              onClick={handleShare}
+              disabled={busy}
+              className="text-[10px] font-black text-white bg-emerald-600 px-2 py-1 rounded border border-emerald-700 transition-all uppercase tracking-widest flex items-center gap-1 shadow-sm active:scale-95 disabled:opacity-50"
+            >
+              <span className="text-[12px]">📤</span> Post Find
+            </button>
+            <button 
               onClick={handlePrint}
               className="text-[10px] font-black text-emerald-600 hover:text-white hover:bg-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-1 rounded border border-emerald-200 dark:border-emerald-800 transition-all uppercase tracking-widest"
             >
@@ -232,6 +260,8 @@ export function FindModal(props: { findId: string; onClose: () => void }) {
                 <DetailItem label="Object Type" value={draft.objectType} />
                 {draft.coinType && <DetailItem label="Coin Type" value={draft.coinType} />}
                 {draft.coinDenomination && <DetailItem label="Denomination" value={draft.coinDenomination} />}
+                {draft.ruler && <DetailItem label="Ruler" value={draft.ruler} />}
+                {draft.dateRange && <DetailItem label="Date Range" value={draft.dateRange} />}
                 <DetailItem label="Period" value={draft.period} />
                 <DetailItem label="Material" value={draft.material} />
                 <DetailItem label="PAS ID" value={draft.pasId} />
@@ -341,6 +371,32 @@ export function FindModal(props: { findId: string; onClose: () => void }) {
                               <option value="Jetton" />
                           </datalist>
                       </label>
+                      <label className="grid gap-1">
+                          <span className="text-sm font-bold opacity-75 text-emerald-600 dark:text-emerald-400">
+                            {draft.period === 'Celtic' ? 'Tribe / Ruler' : 
+                             draft.period === 'Roman' ? 'Emperor / Ruler' : 
+                             'Ruler / Issuer'}
+                          </span>
+                          <input 
+                              className="w-full bg-white dark:bg-gray-800 border-2 border-emerald-100 dark:border-emerald-900 rounded-xl p-2.5 focus:ring-2 focus:ring-emerald-500 outline-none transition-all" 
+                              value={draft.ruler || ""} 
+                              onChange={(e) => setDraft({ ...draft, ruler: e.target.value })} 
+                              placeholder={
+                                draft.period === 'Celtic' ? 'e.g., Iceni, Trinovantes' :
+                                draft.period === 'Roman' ? 'e.g., Hadrian, Constantine' :
+                                'e.g., Henry II, Elizabeth I'
+                              }
+                          />
+                      </label>
+                      <label className="grid gap-1">
+                          <span className="text-sm font-bold opacity-75 text-emerald-600 dark:text-emerald-400">Date Range</span>
+                          <input 
+                              className="w-full bg-white dark:bg-gray-800 border-2 border-emerald-100 dark:border-emerald-900 rounded-xl p-2.5 focus:ring-2 focus:ring-emerald-500 outline-none transition-all" 
+                              value={draft.dateRange || ""} 
+                              onChange={(e) => setDraft({ ...draft, dateRange: e.target.value })} 
+                              placeholder="e.g., 1272-1307"
+                          />
+                      </label>
                   </div>
                 )}
               </div>
@@ -368,6 +424,19 @@ export function FindModal(props: { findId: string; onClose: () => void }) {
                   </select>
                 </label>
               </div>
+
+              {/* Also add dateRange for Artefacts (not just coins) */}
+              {!(draft.objectType.toLowerCase().includes("coin") || draft.coinType) && (
+                <label className="grid gap-1">
+                  <span className="text-sm font-bold opacity-75">Date Range / Circa</span>
+                  <input 
+                    className="w-full bg-white dark:bg-gray-800 border-2 border-gray-100 dark:border-gray-700 rounded-xl p-2.5 focus:ring-2 focus:ring-emerald-500 outline-none transition-all" 
+                    value={draft.dateRange || ""} 
+                    onChange={(e) => setDraft({ ...draft, dateRange: e.target.value })} 
+                    placeholder="e.g., c. 1200-1400"
+                  />
+                </label>
+              )}
 
               <label className="grid gap-1">
                 <span className="text-sm font-bold opacity-75">PAS ID (if recorded)</span>
@@ -649,6 +718,17 @@ export function FindModal(props: { findId: string; onClose: () => void }) {
               }}
           />
       )}
+
+      {/* Off-screen ShareCard for capture */}
+      <div style={{ position: 'fixed', top: '-2000px', left: '-2000px', opacity: 0, pointerEvents: 'none' }}>
+          <ShareCard 
+            ref={shareCardRef}
+            type={draft.isFavorite ? 'find-of-the-day' : 'find'}
+            find={draft}
+            permission={permission || undefined}
+            photoUrl={imageUrls[0]?.url}
+          />
+      </div>
     </>
   );
 }

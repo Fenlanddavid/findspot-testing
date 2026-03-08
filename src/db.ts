@@ -143,6 +143,8 @@ export type Find = {
   detector?: string;
   targetId?: number;
   depthCm?: number;
+  ruler?: string;
+  dateRange?: string;
 
   storageLocation: string;
   notes: string;
@@ -304,6 +306,10 @@ export class FindSpotDB extends Dexie {
                 await tx.table("finds").where("permissionId").equals(p.id).modify({ fieldId: fieldId });
             }
         }
+    });
+
+    this.version(12).stores({
+      finds: "id, projectId, permissionId, fieldId, sessionId, findCode, objectType, isFavorite, targetId, detector, ruler, dateRange, createdAt",
     });
   }
 }

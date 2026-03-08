@@ -59,6 +59,7 @@ export default function FindPage(props: { projectId: string; permissionId: strin
   const [objectType, setObjectType] = useState("");
   const [coinType, setCoinType] = useState("");
   const [coinDenomination, setCoinDenomination] = useState("");
+  const [ruler, setRuler] = useState("");
 
   const [lat, setLat] = useState<number | null>(null);
   const [lon, setLon] = useState<number | null>(null);
@@ -129,6 +130,7 @@ export default function FindPage(props: { projectId: string; permissionId: strin
     setObjectType("");
     setCoinType("");
     setCoinDenomination("");
+    setRuler("");
     setLat(null);
     setLon(null);
     setAcc(null);
@@ -201,6 +203,7 @@ export default function FindPage(props: { projectId: string; permissionId: strin
         objectType: objectType.trim(),
         coinType: coinType.trim(),
         coinDenomination: coinDenomination.trim(),
+        ruler: ruler.trim(),
         lat,
         lon,
         gpsAccuracyM: acc,
@@ -455,6 +458,23 @@ export default function FindPage(props: { projectId: string; permissionId: strin
                                 <option value="Ryal" />
                                 <option value="Jetton" />
                             </datalist>
+                        </label>
+                        <label className="block">
+                            <div className="mb-1.5 text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                                {period === 'Celtic' ? 'Tribe / Ruler' : 
+                                 period === 'Roman' ? 'Emperor / Ruler' : 
+                                 'Ruler / Issuer'}
+                            </div>
+                            <input 
+                                value={ruler} 
+                                onChange={(e) => setRuler(e.target.value)} 
+                                placeholder={
+                                    period === 'Celtic' ? 'e.g., Iceni, Trinovantes' :
+                                    period === 'Roman' ? 'e.g., Hadrian, Constantine' :
+                                    'e.g., Henry II, Elizabeth I'
+                                }
+                                className="w-full bg-white dark:bg-gray-900 border-2 border-emerald-100 dark:border-emerald-900 rounded-xl p-3 focus:ring-2 focus:ring-emerald-500 outline-none transition-shadow"
+                            />
                         </label>
                     </div>
                 )}
