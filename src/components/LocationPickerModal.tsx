@@ -45,7 +45,13 @@ export function LocationPickerModal(props: {
       const style: any = {
           version: 8,
           sources: {},
-          layers: []
+          layers: [
+              {
+                  id: "background",
+                  type: "background",
+                  paint: { "background-color": "#f3f4f6" }
+              }
+          ]
       };
 
       // 1. THE BONE BASE (Solid Terrain) - 100% Opaque
@@ -128,7 +134,7 @@ export function LocationPickerModal(props: {
           source: "base-raster",
           paint: { 
               "raster-fade-duration": 0,
-              "raster-opacity": showLidar ? 0.3 : 1.0 // 30% Basemap skin for extreme visibility
+              "raster-opacity": showLidar ? 0.3 : 1.0 
           }
       });
 
@@ -146,21 +152,20 @@ export function LocationPickerModal(props: {
           });
       }
   
-      const currentLngLat = mapRef.current ? mapRef.current.getCenter() : (lastPosition.current?.center || [lon, lat]);
-      const currentZoom = mapRef.current ? mapRef.current.getZoom() : (lastPosition.current?.zoom || zoom);
-  
-      if (mapRef.current) {
-          mapRef.current.remove();
-          mapRef.current = null;
-      }
+      const startCenter: [number, number] = lastPosition.current?.center || [lon, lat];
+      const startZoom: number = lastPosition.current?.zoom || zoom;
   
       const map = new maplibregl.Map({
         container: mapDivRef.current,
         style: style,
-        center: currentLngLat,
-        zoom: currentZoom,
+        center: startCenter,
+        zoom: startZoom,
       });
   
+      map.on("load", () => {
+          map.resize();
+      });
+
       map.on("moveend", () => {
           lastPosition.current = {
               center: [map.getCenter().lng, map.getCenter().lat],
@@ -191,7 +196,12 @@ export function LocationPickerModal(props: {
     mapRef.current = map;
     markerRef.current = marker;
 
-    return () => map.remove();
+    return () => {
+        if (mapRef.current) {
+            mapRef.current.remove();
+            mapRef.current = null;
+        }
+    };
   }, [mapStyle, showLidar]);
 
   return (
