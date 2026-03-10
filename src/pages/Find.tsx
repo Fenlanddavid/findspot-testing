@@ -23,7 +23,7 @@ function makeFindCode(): string {
   return `FS-${year}-${rand}`;
 }
 
-export default function FindPage(props: { projectId: string; permissionId: string | null; sessionId: string | null }) {
+export default function FindPage(props: { projectId: string; permissionId: string | null; sessionId: string | null; initialLat?: number | null; initialLon?: number | null }) {
   const navigate = useNavigate();
   const [locationName, setLocationName] = useState("");
   const [fieldId, setFieldId] = useState<string | null>(props.sessionId ? null : null); // We'll fetch if session exists
@@ -61,10 +61,15 @@ export default function FindPage(props: { projectId: string; permissionId: strin
   const [coinDenomination, setCoinDenomination] = useState("");
   const [ruler, setRuler] = useState("");
 
-  const [lat, setLat] = useState<number | null>(null);
-  const [lon, setLon] = useState<number | null>(null);
+  const [lat, setLat] = useState<number | null>(props.initialLat ?? null);
+  const [lon, setLon] = useState<number | null>(props.initialLon ?? null);
   const [acc, setAcc] = useState<number | null>(null);
-  const [osGridRef, setOsGridRef] = useState("");
+  const [osGridRef, setOsGridRef] = useState(() => {
+    if (props.initialLat && props.initialLon) {
+      return toOSGridRef(props.initialLat, props.initialLon) || "";
+    }
+    return "";
+  });
   const [w3w, setW3w] = useState("");
 
   const [period, setPeriod] = useState<Find["period"]>("Roman");

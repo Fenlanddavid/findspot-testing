@@ -352,22 +352,23 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
 
   return (
     <div className="flex flex-col h-[calc(100vh-180px)] sm:h-[calc(100vh-220px)] bg-slate-950 rounded-3xl overflow-hidden border border-slate-800 shadow-2xl relative">
-      <header className="h-20 px-6 bg-slate-900/50 border-b border-white/5 flex justify-between items-center shrink-0 z-50 backdrop-blur-md">
-          <div className="flex flex-col">
-              <p className="m-0 text-[10px] font-black text-emerald-500 tracking-[0.2em] uppercase">Lidar & Satellite Feature Detection</p>
+      <header className="px-4 py-3 bg-slate-900/50 border-b border-white/5 flex flex-col gap-3 shrink-0 z-50 backdrop-blur-md">
+          <div className="flex justify-between items-center w-full">
+              <p className="m-0 text-[9px] sm:text-[10px] font-black text-emerald-500 tracking-[0.1em] sm:tracking-[0.2em] uppercase whitespace-nowrap">Lidar & Satellite Feature Detection</p>
+              <div className="flex gap-1.5 sm:gap-2 items-center">
+                  <button onClick={() => navigate('/finds?view=map')} className="text-[8px] sm:text-[10px] font-black text-slate-400 hover:text-white transition-colors tracking-widest uppercase px-2 py-1.5 border border-white/5 rounded-lg sm:rounded-xl whitespace-nowrap">Manual Map</button>
+                  <button onClick={clearScan} className="text-[8px] sm:text-[10px] font-black text-slate-400 hover:text-white transition-colors tracking-widest uppercase px-2 py-1.5">Clear</button>
+                  <button onClick={findMe} className="bg-slate-800 text-white px-2 py-1.5 sm:px-4 sm:py-2 rounded-lg sm:rounded-xl text-[8px] sm:text-[10px] font-black tracking-widest uppercase hover:bg-slate-700 transition-colors">GPS</button>
+                  <button onClick={executeScan} disabled={analyzing} className="bg-emerald-500 text-white px-3 py-1.5 sm:px-6 sm:py-2.5 rounded-lg sm:rounded-xl text-[8px] sm:text-[10px] font-black tracking-widest uppercase hover:bg-emerald-400 transition-all shadow-[0_0_20px_rgba(16,185,129,0.3)] disabled:opacity-50 disabled:animate-pulse">
+                    {analyzing ? 'Scanning...' : 'Scan'}
+                  </button>
+              </div>
           </div>
-          <form onSubmit={searchLocation} className="hidden md:flex gap-2">
-              <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Village, town..." className="bg-black/40 border border-white/10 text-white px-4 py-2 rounded-xl w-48 text-xs focus:ring-1 focus:ring-emerald-500 outline-none transition-all" />
-              <button type="submit" className="bg-slate-800 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-slate-700 transition-colors">SEARCH</button>
+          
+          <form onSubmit={searchLocation} className="flex gap-2 w-full">
+              <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Village, town..." className="bg-black/40 border border-white/10 text-white px-3 py-1.5 rounded-lg flex-1 text-xs focus:ring-1 focus:ring-emerald-500 outline-none transition-all" />
+              <button type="submit" className="bg-slate-800 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-700 transition-colors">SEARCH</button>
           </form>
-          <div className="flex gap-2 items-center">
-              <button onClick={() => navigate('/finds?view=map')} className="hidden lg:block text-[10px] font-black text-slate-400 hover:text-white transition-colors tracking-widest uppercase px-3 py-2 border border-white/5 rounded-xl mr-2">View Data Manually</button>
-              <button onClick={clearScan} className="text-[10px] font-black text-slate-400 hover:text-white transition-colors tracking-widest uppercase px-3 py-2">Clear</button>
-              <button onClick={findMe} className="bg-slate-800 text-white px-4 py-2 rounded-xl text-[10px] font-black tracking-widest uppercase hover:bg-slate-700 transition-colors">Zoom to Me</button>
-              <button onClick={executeScan} disabled={analyzing} className="bg-emerald-500 text-white px-6 py-2.5 rounded-xl text-[10px] font-black tracking-widest uppercase hover:bg-emerald-400 transition-all shadow-[0_0_20px_rgba(16,185,129,0.3)] disabled:opacity-50 disabled:animate-pulse">
-                {analyzing ? 'Scanning...' : 'Execute Scan'}
-              </button>
-          </div>
       </header>
 
       <div className="flex flex-1 overflow-hidden relative">
@@ -382,18 +383,48 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
             </div>
 
             {/* Floating Alerts */}
-            <div className="absolute top-6 left-1/2 -translate-x-1/2 z-[100] flex flex-col gap-3 items-center pointer-events-none w-full max-w-sm">
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[100] flex flex-col gap-2 items-center pointer-events-none w-[90%] max-w-sm">
                 {heritageCount > 0 && (
-                    <div className="bg-red-600 text-white px-6 py-2 rounded-full text-[10px] font-black tracking-widest uppercase shadow-2xl border border-white/20 animate-bounce">
-                        ⛔ Scheduled Monument Identified
+                    <div className="bg-red-600 text-white px-4 py-1.5 rounded-full text-[8px] sm:text-[10px] font-black tracking-widest uppercase shadow-2xl border border-white/20 animate-bounce">
+                        ⛔ Scheduled Monument
                     </div>
                 )}
                 {zoomWarning && (
-                    <div className="bg-amber-500 text-black px-6 py-2 rounded-full text-[10px] font-black tracking-widest uppercase shadow-2xl border border-white/20">
-                        ⚠️ Data accuracy highest at Z16.0
+                    <div className="bg-amber-500 text-black px-4 py-1.5 rounded-full text-[8px] sm:text-[10px] font-black tracking-widest uppercase shadow-2xl border border-white/20">
+                        ⚠️ Use Zoom 16.0
                     </div>
                 )}
             </div>
+
+            {/* Mobile Target Card Popup */}
+            {selectedId && (
+                <div className="absolute bottom-6 left-4 right-4 z-[100] lg:hidden animate-in slide-in-from-bottom-4 duration-300">
+                    {detectedFeatures.filter(f => f.id === selectedId).map(f => (
+                        <div key={f.id} className={`p-4 rounded-2xl border shadow-2xl ${
+                            f.source === 'terrain' ? 'bg-emerald-500 border-white text-white' : 'bg-sky-500 border-white text-white'
+                        }`}>
+                            <div className="flex justify-between items-center mb-2">
+                                <div className="flex items-center gap-2">
+                                    <div className="w-6 h-6 bg-black/20 rounded-lg flex items-center justify-center text-[10px] font-black">{f.number}</div>
+                                    <h3 className="text-xs font-black uppercase tracking-tight">{f.type}</h3>
+                                </div>
+                                <button onClick={(e) => { e.stopPropagation(); setSelectedId(null); }} className="text-white/70 hover:text-white p-1">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                </button>
+                            </div>
+                            <div className="flex justify-between items-center text-[10px]">
+                                <span className="font-bold uppercase opacity-80">{f.source === 'terrain' ? 'Lidar Signal' : 'Aerial Signal'}</span>
+                                <span className="font-black uppercase tracking-widest">Confidence: {f.confidence}</span>
+                            </div>
+                            {f.isProtected && <div className="mt-2 p-1.5 bg-white/20 rounded-lg text-[8px] font-black uppercase tracking-widest text-center">⚠️ Protected Monument</div>}
+                            <div className="mt-3 grid grid-cols-2 gap-2">
+                                <button onClick={() => mapRef.current?.flyTo({ center: f.center, zoom: 18 })} className="bg-black/20 hover:bg-black/30 py-2 rounded-lg text-[9px] font-black uppercase">Refine Map</button>
+                                <button onClick={() => navigate(`/find?lat=${f.center[1]}&lon=${f.center[0]}`)} className="bg-white text-slate-900 py-2 rounded-lg text-[9px] font-black uppercase">Record Find</button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
         </div>
 
         {/* Sidebar */}

@@ -341,7 +341,15 @@ function FindRouter({ projectId }: { projectId: string }) {
   const [params] = useSearchParams();
   const permissionId = params.get("permissionId");
   const sessionId = params.get("sessionId");
-  return <FindPage projectId={projectId} permissionId={permissionId ?? null} sessionId={sessionId ?? null} />;
+  const lat = params.get("lat");
+  const lon = params.get("lon");
+  return <FindPage 
+    projectId={projectId} 
+    permissionId={permissionId ?? null} 
+    sessionId={sessionId ?? null} 
+    initialLat={lat ? parseFloat(lat) : null}
+    initialLon={lon ? parseFloat(lon) : null}
+  />;
 }
 
 export default function App() {
