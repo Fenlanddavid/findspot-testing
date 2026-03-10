@@ -9,7 +9,7 @@ import Home from "./pages/Home";
 import PermissionPage from "./pages/Permission";
 import SessionPage from "./pages/Session";
 import FindPage from "./pages/Find";
-import MapPage from "./pages/Map";
+import FieldGuide from "./pages/FieldGuide";
 import AllFinds from "./pages/AllFinds";
 import FindsBox from "./pages/FindsBox";
 import AllPermissions from "./pages/AllPermissions";
@@ -245,7 +245,7 @@ function Shell() {
         <div className="flex items-center justify-between gap-4 flex-wrap">
             <nav className="flex gap-x-3 sm:gap-x-4 gap-y-2 flex-wrap items-center text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-300">
               <NavLink to="/" className={({ isActive }) => `hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors ${isActive ? "text-emerald-600 dark:text-emerald-400 font-bold" : ""}`}>Home</NavLink>
-              <NavLink to="/map" className={({ isActive }) => `hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors ${isActive ? "text-emerald-600 dark:text-emerald-400 font-bold" : ""}`}>Map</NavLink>
+              <NavLink to="/fieldguide" className={({ isActive }) => `hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors ${isActive ? "text-emerald-600 dark:text-emerald-400 font-bold" : ""}`}>FieldGuide</NavLink>
               <NavLink to="/permissions" className={({ isActive }) => `hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors ${isActive ? "text-emerald-600 dark:text-emerald-400 font-bold" : ""}`}>Permissions</NavLink>
               <NavLink to="/finds" className={({ isActive }) => `hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors ${isActive ? "text-emerald-600 dark:text-emerald-400 font-bold" : ""}`}>Search</NavLink>
               <NavLink to="/finds-box" className={({ isActive }) => `hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors ${isActive ? "text-emerald-600 dark:text-emerald-400 font-bold" : ""}`}>The Finds Box</NavLink>
@@ -297,7 +297,7 @@ function Shell() {
             <Route path="/find" element={<FindRouter projectId={projectId} />} />
             <Route path="/finds" element={<AllFinds projectId={projectId} />} />
             <Route path="/finds-box" element={<FindsBox projectId={projectId} />} />
-            <Route path="/map" element={<MapPage projectId={projectId} />} />
+            <Route path="/fieldguide" element={<FieldGuide projectId={projectId} />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/permission" element={<LinkToPermission />} />
             <Route path="/permission/:id" element={<LinkToPermission />} />
@@ -332,7 +332,7 @@ function HomeRouter({ projectId }: { projectId: string }) {
       goAllFinds={() => nav("/finds")}
       goFindsWithFilter={(filter: string) => nav(`/finds?${filter}`)}
       goFindsBox={() => nav("/finds-box")}
-      goMap={() => nav("/map")}
+      goFieldGuide={() => nav("/fieldguide")}
     />
   );
 }

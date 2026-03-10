@@ -16,7 +16,7 @@ export default function Home(props: {
   goAllFinds: () => void;
   goFindsWithFilter: (filter: string) => void;
   goFindsBox: () => void;
-  goMap: () => void;
+  goFieldGuide: () => void;
 }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [openFindId, setOpenFindId] = useState<string | null>(null);
