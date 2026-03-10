@@ -13,6 +13,7 @@ interface Cluster {
     findPotential: number;
     center: [number, number];
     source: 'terrain' | 'satellite';
+    polarity?: 'Raised' | 'Sunken' | 'Unknown';
     metrics?: { circularity: number; density: number; ratio: number; area: number };
 }
 
@@ -46,6 +47,7 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
   const [systemLog, setSystemLog] = useState<string[]>(["SYSTEM READY. Execute Scan."]);
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [pinningId, setPinningId] = useState<string | null>(null);
   const navigate = useNavigate();
   
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -68,6 +70,68 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
     setSystemLog(["SYSTEM CLEARED. Ready for new scan."]);
   };
 
+  const pinToSearch = async (cluster: Cluster) => {
+    setPinningId(cluster.id);
+    try {
+        const { db } = await import('../db');
+        const { v4: uuid } = await import('uuid');
+        const { toOSGridRef } = await import('../services/gps');
+        
+        let targetPermissionId = "";
+        const existing = await db.permissions.where("name").equals("FieldGuide Pins").first();
+        if (existing) {
+            targetPermissionId = existing.id;
+        } else {
+            targetPermissionId = uuid();
+            const now = new Date().toISOString();
+            await db.permissions.add({
+                id: targetPermissionId,
+                projectId: projectId,
+                name: "FieldGuide Pins",
+                type: "individual",
+                lat: null, lon: null, gpsAccuracyM: null,
+                collector: "System", landType: "other", permissionGranted: false,
+                notes: "Container for quick-saved map anomalies.",
+                createdAt: now, updatedAt: now
+            });
+        }
+
+        const now = new Date().toISOString();
+        const grid = toOSGridRef(cluster.center[1], cluster.center[0]) || "";
+        
+        await db.finds.add({
+            id: uuid(),
+            projectId: projectId,
+            permissionId: targetPermissionId,
+            fieldId: null,
+            sessionId: null,
+            findCode: `FG-${Math.floor(1000 + Math.random() * 9000)}`,
+            objectType: cluster.type,
+            lat: cluster.center[1],
+            lon: cluster.center[0],
+            gpsAccuracyM: 1,
+            osGridRef: grid,
+            w3w: "",
+            period: "Unknown",
+            material: "Other",
+            weightG: null, widthMm: null, heightMm: null, depthMm: null,
+            decoration: cluster.polarity ? `Signal: ${cluster.polarity}` : "",
+            completeness: "Complete",
+            findContext: "FieldGuide Anomaly",
+            storageLocation: "",
+            notes: `Auto-pinned from FieldGuide. Source: ${cluster.source}. Confidence: ${cluster.confidence}.`,
+            createdAt: now,
+            updatedAt: now
+        });
+        
+        addLog(`Pinned Target #${cluster.number} to Search Map.`);
+        setTimeout(() => setPinningId(null), 1000);
+    } catch (e) {
+        addLog("Pinning failed.");
+        setPinningId(null);
+    }
+  };
+
   useEffect(() => {
     if (mapRef.current || !mapContainerRef.current) return;
     const map = new maplibregl.Map({
@@ -77,8 +141,8 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
         sources: { 'osm': { type: 'raster', tiles: ['https://a.tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '&copy; OSM' } },
         layers: [{ id: 'osm', type: 'raster', source: 'osm' }]
       },
-      center: [-1.8575, 51.4158],
-      zoom: 15,
+      center: [-2.0, 54.5],
+      zoom: 5.5,
     });
 
     map.on('load', () => {
@@ -186,6 +250,7 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
 
     const rawData = stitchCtx.getImageData(0, 0, stitchSize, stitchSize).data;
     const processed = new Float32Array(stitchSize * stitchSize);
+    const laplacian = new Float32Array(stitchSize * stitchSize);
     
     if (sourceType === 'terrain') {
         let minG = 255, maxG = 0;
@@ -230,8 +295,10 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
             const fxx = processed[y*stitchSize + (x+1)] + processed[y*stitchSize + (x-1)] - 2*f;
             const fyy = processed[(y+1)*stitchSize + x] + processed[(y-1)*stitchSize + x] - 2*f;
             const fxy = (processed[(y+1)*stitchSize + (x+1)] + processed[(y-1)*stitchSize + (x-1)] - processed[(y+1)*stitchSize + (x-1)] - processed[(y-1)*stitchSize + (x+1)]) / 4;
-            const ridge = Math.max(Math.abs(fxx + fyy), Math.sqrt(Math.max(0, (fxx-fyy)*(fxx-fyy) + 4*fxy*fxy)));
+            const lap = fxx + fyy;
+            const ridge = Math.max(Math.abs(lap), Math.sqrt(Math.max(0, (fxx-fyy)*(fxx-fyy) + 4*fxy*fxy)));
             ridgeMap[y*stitchSize + x] = ridge;
+            laplacian[y*stitchSize + x] = lap;
             if (ridge > maxRidge) maxRidge = ridge;
         }
     }
@@ -255,10 +322,12 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
         for (let x = 0; x < stitchSize; x++) {
             const idx = y * stitchSize + x;
             if (featureMap[idx] === 1 && visited[idx] === 0) {
-                const cluster: Cluster = { id: Math.random().toString(36).substring(7), points: [], minX: x, maxX: x, minY: y, maxY: y, type: "Anomaly", score: 0, number: 0, isProtected: false, confidence: 'Medium', findPotential: 0, center: [0, 0], source: sourceType };
+                const cluster: Cluster = { id: Math.random().toString(36).substring(7), points: [], minX: x, maxX: x, minY: y, maxY: y, type: "Anomaly", score: 0, number: 0, isProtected: false, confidence: 'Medium', findPotential: 0, center: [0, 0], source: sourceType, polarity: 'Unknown' };
                 const queue: [number, number][] = [[x, y]]; visited[idx] = 1;
+                let sumLap = 0;
                 while (queue.length > 0) {
                     const [cx, cy] = queue.shift()!; cluster.points.push({x: cx, y: cy});
+                    sumLap += laplacian[cy * stitchSize + cx];
                     cluster.minX = Math.min(cluster.minX, cx); cluster.maxX = Math.max(cluster.maxX, cx);
                     cluster.minY = Math.min(cluster.minY, cy); cluster.maxY = Math.max(cluster.maxY, cy);
                     for (const [nx, ny] of [[cx+1, cy], [cx-1, cy], [cx, cy+1], [cx, cy-1]]) {
@@ -281,6 +350,14 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
                     const yNorm = (tY_start + midY / 256) / n;
                     const lat = (180 / Math.PI) * (2 * Math.atan(Math.exp(Math.PI * (1 - 2 * yNorm))) - Math.PI / 2);
                     cluster.center = [lon, lat];
+                    
+                    if (sourceType === 'terrain') {
+                        // In ArcGIS Hillshade, low Laplacian (negative) usually means a ridge/bank (Raised) 
+                        // as it's a local maximum in brightness relative to NW light. 
+                        // High Laplacian (positive) usually means a ditch/pit (Sunken).
+                        cluster.polarity = sumLap < 0 ? 'Raised' : 'Sunken';
+                    }
+
                     if (lon >= bounds.getWest() && lon <= bounds.getEast() && lat >= bounds.getSouth() && lat <= bounds.getNorth()) {
                         for (const asset of assetsGeoJSON.features as any[]) {
                             if (asset.geometry?.type === 'Polygon' && isPointInPolygon(lat, lon, asset.geometry.coordinates)) { cluster.isProtected = true; cluster.monumentName = asset.properties.Name; break; }
@@ -427,15 +504,38 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                                 </button>
                             </div>
-                            <div className="flex justify-between items-center text-[10px]">
-                                <span className="font-bold uppercase opacity-80">{f.source === 'terrain' ? 'Lidar Signal' : 'Aerial Signal'}</span>
-                                <span className="font-black uppercase tracking-widest">Confidence: {f.confidence}</span>
+                            
+                            <div className="grid grid-cols-2 gap-3 mb-3">
+                                <div className="bg-black/20 p-2 rounded-xl">
+                                    <span className="block text-[8px] uppercase font-bold opacity-70">Source</span>
+                                    <span className="text-[10px] font-black uppercase tracking-widest">{f.source === 'terrain' ? 'Lidar' : 'Aerial'}</span>
+                                </div>
+                                <div className="bg-black/20 p-2 rounded-xl">
+                                    <span className="block text-[8px] uppercase font-bold opacity-70">Confidence</span>
+                                    <span className="text-[10px] font-black uppercase tracking-widest">{f.confidence}</span>
+                                </div>
+                                {f.source === 'terrain' && (
+                                    <div className="bg-black/20 p-2 rounded-xl col-span-2 flex justify-between items-center">
+                                        <div>
+                                            <span className="block text-[8px] uppercase font-bold opacity-70">Signal Profile</span>
+                                            <span className="text-[10px] font-black uppercase tracking-widest">{f.polarity || 'Calculating...'}</span>
+                                        </div>
+                                        <div className="text-lg">{f.polarity === 'Raised' ? '⛰️' : '🕳️'}</div>
+                                    </div>
+                                )}
                             </div>
-                            {f.isProtected && <div className="mt-2 p-1.5 bg-white/20 rounded-lg text-[8px] font-black uppercase tracking-widest text-center">⚠️ Protected Monument</div>}
-                            <div className="mt-3 grid grid-cols-2 gap-2">
-                                <button onClick={() => mapRef.current?.flyTo({ center: f.center, zoom: 18 })} className="bg-black/20 hover:bg-black/30 py-2 rounded-lg text-[9px] font-black uppercase">Refine Map</button>
-                                <button onClick={() => navigate(`/find?lat=${f.center[1]}&lon=${f.center[0]}`)} className="bg-white text-slate-900 py-2 rounded-lg text-[9px] font-black uppercase">Record Find</button>
-                            </div>
+
+                            {f.isProtected && <div className="mb-3 p-1.5 bg-red-600/40 rounded-lg text-[8px] font-black uppercase tracking-widest text-center border border-red-400">⚠️ Protected Monument</div>}
+                            
+                            <button 
+                                onClick={() => pinToSearch(f)} 
+                                disabled={pinningId === f.id}
+                                className={`w-full py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg flex items-center justify-center gap-2 ${
+                                    pinningId === f.id ? 'bg-white text-emerald-600 animate-pulse' : 'bg-white text-slate-900 hover:bg-slate-100'
+                                }`}
+                            >
+                                {pinningId === f.id ? '📍 PINNED' : '📍 Pin to Search Map'}
+                            </button>
                         </div>
                     ))}
                 </div>
