@@ -505,7 +505,7 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
                                 </button>
                             </div>
                             
-                            <div className="grid grid-cols-2 gap-3 mb-3">
+                            <div className="grid grid-cols-2 gap-3 mb-2">
                                 <div className="bg-black/20 p-2 rounded-xl">
                                     <span className="block text-[8px] uppercase font-bold opacity-70">Source</span>
                                     <span className="text-[10px] font-black uppercase tracking-widest">{f.source === 'terrain' ? 'Lidar' : 'Aerial'}</span>
@@ -514,16 +514,13 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
                                     <span className="block text-[8px] uppercase font-bold opacity-70">Confidence</span>
                                     <span className="text-[10px] font-black uppercase tracking-widest">{f.confidence}</span>
                                 </div>
-                                {f.source === 'terrain' && (
-                                    <div className="bg-black/20 p-2 rounded-xl col-span-2 flex justify-between items-center">
-                                        <div>
-                                            <span className="block text-[8px] uppercase font-bold opacity-70">Signal Profile</span>
-                                            <span className="text-[10px] font-black uppercase tracking-widest">{f.polarity || 'Calculating...'}</span>
-                                        </div>
-                                        <div className="text-lg">{f.polarity === 'Raised' ? '⛰️' : '🕳️'}</div>
-                                    </div>
-                                )}
                             </div>
+
+                            {f.source === 'terrain' && (
+                                <div className="px-1 mb-3">
+                                    <p className="m-0 text-[10px] font-bold uppercase opacity-80 tracking-wide">Signal Profile: <span className="font-black">{f.polarity || 'Unknown'}</span></p>
+                                </div>
+                            )}
 
                             {f.isProtected && <div className="mb-3 p-1.5 bg-red-600/40 rounded-lg text-[8px] font-black uppercase tracking-widest text-center border border-red-400">⚠️ Protected Monument</div>}
                             
@@ -534,7 +531,7 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
                                     pinningId === f.id ? 'bg-white text-emerald-600 animate-pulse' : 'bg-white text-slate-900 hover:bg-slate-100'
                                 }`}
                             >
-                                {pinningId === f.id ? '📍 PINNED' : '📍 Pin to Search Map'}
+                                {pinningId === f.id ? '📍 PINNED TO MAP' : '📍 Pin to Search Map'}
                             </button>
                         </div>
                     ))}

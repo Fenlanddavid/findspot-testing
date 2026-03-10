@@ -115,6 +115,20 @@ export default function AllFinds(props: { projectId: string }) {
     return () => { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } };
   }, [viewMode, mapStyleMode, showLidar]);
 
+  useEffect(() => {
+    if (mapRef.current && mapRef.current.getSource('finds') && finds) {
+        const source = mapRef.current.getSource('finds') as maplibregl.GeoJSONSource;
+        source.setData({
+            type: 'FeatureCollection',
+            features: finds.filter(f => f.lat && f.lon).map(f => ({
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: [f.lon!, f.lat!] },
+                properties: { id: f.id }
+            }))
+        });
+    }
+  }, [finds]);
+
   // --- RENDER HELPERS ---
   const findIds = useMemo(() => finds?.map(s => s.id) ?? [], [finds]);
   const stats = useMemo(() => {
