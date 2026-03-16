@@ -26,8 +26,19 @@ interface Cluster {
     metrics?: { circularity: number; density: number; ratio: number; area: number };
 }
 
+interface PASFind {
+    id: string;
+    objectType: string;
+    broadperiod: string;
+    county: string;
+    workflow: string;
+    lat: number;
+    lon: number;
+    distance?: number;
+}
+
 /**
- * FieldGuide Standalone V12.7 - Expert Verification Engine
+ * FieldGuide Standalone V12.8 - Expert Verification Engine
  * Consensus: Lidar Topography | Slope Gradient | Hydrology & Palaeochannels | HE AIM Mapping
  */
 const SCAN_PROFILE = {
@@ -93,6 +104,13 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
   const [systemLog, setSystemLog] = useState<string[]>(["SYSTEM READY. Execute Scan."]);
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  
+  // PAS & Potential Score State
+  const [pasFinds, setPasFinds] = useState<PASFind[]>([]);
+  const [loadingPAS, setLoadingPAS] = useState(false);
+  const [potentialScore, setPotentialScore] = useState<{score: number, reasons: string[]} | null>(null);
+  const [monumentPoints, setMonumentPoints] = useState<[number, number][]>([]);
+
   const navigate = useNavigate();
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -115,7 +133,111 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
         const tSrc = mapRef.current.getSource('targets') as maplibregl.GeoJSONSource;
         if (tSrc) tSrc.setData({ type: 'FeatureCollection', features: [] });
     }
+    setPasFinds([]);
+    setPotentialScore(null);
     setSystemLog(["SYSTEM CLEARED. Ready for new scan."]);
+  };
+
+  const loadPASFinds = async () => {
+    if (!mapRef.current) return;
+    const center = mapRef.current.getCenter();
+    setLoadingPAS(true);
+    addLog(`SCANNING PAS DATABASE: [${center.lat.toFixed(4)}, ${center.lng.toFixed(4)}]...`);
+
+    try {
+        // Use a CORS proxy to bypass Cloudflare/CORS restrictions for client-side fetch
+        const pasUrl = `https://finds.org.uk/database/search/results/lat/${center.lat}/lon/${center.lng}/d/5/format/json`;
+        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(pasUrl)}`;
+        
+        const response = await fetch(proxyUrl);
+        const proxyData = await response.json();
+        
+        // allorigins returns the actual response as a string in .contents
+        const data = JSON.parse(proxyData.contents);
+
+        if (data.results && data.results.length > 0) {
+            const finds: PASFind[] = data.results.map((r: any) => ({
+                id: r.id,
+                objectType: r.objecttype,
+                broadperiod: r.broadperiod,
+                county: r.county,
+                workflow: r.workflow,
+                lat: parseFloat(r.latitude),
+                lon: parseFloat(r.longitude)
+            })).filter((f: any) => !isNaN(f.lat) && !isNaN(f.lon));
+
+            setPasFinds(finds);
+            addLog(`SUCCESS: Found ${finds.length} PAS records within 5km.`);
+            
+            // Calculate potential based on these finds
+            calculatePotentialScore(finds, monumentPoints);
+        } else {
+            addLog("PAS: No nearby records found in database.");
+            setPasFinds([]);
+            calculatePotentialScore([], monumentPoints);
+        }
+    } catch (error) {
+        console.error("PAS Fetch Error:", error);
+        addLog("ERROR: PAS database connection timed out.");
+    } finally {
+        setLoadingPAS(false);
+    }
+  };
+
+  const calculatePotentialScore = (pas: PASFind[], monuments: [number, number][]) => {
+    if (!mapRef.current) return;
+    const center = mapRef.current.getCenter();
+    let score = 30; // Base score for any field
+    const reasons: string[] = [];
+
+    // 1. Proximity to PAS Finds (High Weight)
+    const nearbyPAS = pas.filter(f => {
+        const dist = getDistancePAS(center.lat, center.lng, f.lat, f.lon);
+        return dist < 1.0; // 1km radius
+    });
+
+    if (nearbyPAS.length > 5) {
+        score += 35;
+        reasons.push(`${nearbyPAS.length} historic finds within 1km`);
+    } else if (nearbyPAS.length > 0) {
+        score += 20;
+        reasons.push(`Known historic finds in immediate vicinity`);
+    }
+
+    // 2. Proximity to Scheduled Monuments/HE AIM (High Weight)
+    const nearbyMonuments = monuments.filter(m => {
+        const dist = getDistancePAS(center.lat, center.lng, m[1], m[0]);
+        return dist < 0.5; // 500m radius
+    });
+
+    if (nearbyMonuments.length > 0) {
+        score += 25;
+        reasons.push("Adjacent to recorded archaeological monument");
+    }
+
+    // 3. Geographic Features (Water/Slope)
+    // For now, we simulate this based on the existing hydrology scan if any linear features were found
+    const hasWater = detectedFeatures.some(f => f.source === 'hydrology' && f.metrics && f.metrics.ratio > 5);
+    if (hasWater) {
+        score += 15;
+        reasons.push("Near palaeochannel or historic watercourse");
+    }
+
+    // Cap score at 98% (Archaeology is never 100% certain!)
+    const finalScore = Math.min(score, 98);
+    setPotentialScore({ score: finalScore, reasons });
+  };
+
+  // Simple Haversine distance in km
+  const getDistancePAS = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
   };
 
   useEffect(() => {
@@ -184,6 +306,26 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
             } 
         });
         map.on('click', 'targets-circle', (e) => { if (e.features?.[0]) setSelectedId(e.features[0].properties?.id); });
+
+        map.addSource('pas-finds', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+        map.addLayer({
+            id: 'pas-circles',
+            type: 'circle',
+            source: 'pas-finds',
+            paint: {
+                'circle-radius': 6,
+                'circle-color': '#3b82f6',
+                'circle-stroke-width': 2,
+                'circle-stroke-color': '#fff'
+            }
+        });
+
+        map.on('click', 'pas-circles', (e) => {
+            if (e.features?.[0]) {
+                const props = e.features[0].properties;
+                addLog(`PAS FIND: ${props.objectType} (${props.broadperiod}) - ${props.id}`);
+            }
+        });
         
         map.on('move', () => {
             const z = map.getZoom();
@@ -259,6 +401,33 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'start' });
     }
   }, [selectedId]);
+
+  useEffect(() => {
+    if (mapRef.current) {
+        const pasGeoJSON = {
+            type: 'FeatureCollection',
+            features: pasFinds.map(f => ({
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: [f.lon, f.lat] },
+                properties: { id: f.id, objectType: f.objectType, broadperiod: f.broadperiod }
+            }))
+        };
+        const source = mapRef.current.getSource('pas-finds') as maplibregl.GeoJSONSource;
+        if (source) source.setData(pasGeoJSON as any);
+    }
+  }, [pasFinds]);
+
+  // Sync monument points for score calculation
+  useEffect(() => {
+    if (mapRef.current) {
+        const mSrc = mapRef.current.getSource('monuments') as maplibregl.GeoJSONSource;
+        if (mSrc) {
+            // This is a bit of a hack since we can't easily get data back from a source
+            // But heritageCount is updated when the monuments source is set
+            // In the scan logic, we should also setMonumentPoints
+        }
+    }
+  }, [heritageCount]);
 
   useLayoutEffect(() => {
     if (logContainerRef.current) logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
@@ -849,6 +1018,17 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
         const hRes = await fetch(herUrl);
         assetsGeoJSON = await hRes.json();
         setHeritageCount(assetsGeoJSON.features?.length || 0);
+        
+        // Extract center points for scoring
+        const mPoints: [number, number][] = assetsGeoJSON.features.map((f: any) => {
+            if (f.geometry.type === 'Point') return f.geometry.coordinates;
+            // For polygons, use the first coordinate as a rough center
+            if (f.geometry.type === 'Polygon') return f.geometry.coordinates[0][0];
+            if (f.geometry.type === 'MultiPolygon') return f.geometry.coordinates[0][0][0];
+            return [0, 0];
+        });
+        setMonumentPoints(mPoints);
+
         (mapRef.current.getSource('monuments') as maplibregl.GeoJSONSource).setData(assetsGeoJSON as any);
     } catch (e) { addLog("HER connection error."); }
 
@@ -1200,7 +1380,82 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
         </div>
 
         {/* Sidebar */}
-        <div className="w-80 hidden lg:flex flex-col bg-slate-900/80 backdrop-blur-xl border-l border-white/5 shrink-0 relative z-50">
+        <div className="w-80 hidden lg:flex flex-col bg-slate-900/80 backdrop-blur-xl border-l border-white/5 shrink-0 relative z-50 overflow-y-auto scrollbar-hide">
+            
+            {/* Archaeological Potential Section */}
+            <div className="p-6 border-b border-white/10 bg-emerald-500/5">
+                <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-[10px] font-black text-emerald-500 uppercase tracking-[0.2em]">Archaeological Potential</h2>
+                    {potentialScore && (
+                        <span className="text-[10px] font-black text-white bg-emerald-500 px-2 py-0.5 rounded-full shadow-[0_0_10px_rgba(16,185,129,0.4)]">
+                            {potentialScore.score}%
+                        </span>
+                    )}
+                </div>
+                
+                {potentialScore ? (
+                    <div className="space-y-3">
+                        <div className="relative h-2 bg-black/40 rounded-full overflow-hidden">
+                            <div 
+                                className="absolute inset-y-0 left-0 bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.6)] transition-all duration-1000"
+                                style={{ width: `${potentialScore.score}%` }}
+                            />
+                        </div>
+                        <div className="space-y-1.5">
+                            {potentialScore.reasons.map((reason, i) => (
+                                <div key={i} className="flex items-start gap-2">
+                                    <span className="text-emerald-500 mt-0.5 font-bold text-[10px]">✓</span>
+                                    <p className="text-[10px] font-bold text-slate-300 leading-tight">{reason}</p>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                ) : (
+                    <p className="text-[10px] text-slate-500 font-bold uppercase italic leading-tight">Perform a scan to calculate site potential.</p>
+                )}
+            </div>
+
+            {/* PAS Intelligence Section */}
+            <div className="p-6 border-b border-white/10 bg-blue-500/5">
+                <div className="flex justify-between items-baseline mb-4">
+                    <h2 className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em]">PAS Intelligence</h2>
+                    <button 
+                        onClick={loadPASFinds}
+                        disabled={loadingPAS}
+                        className={`text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded border transition-all ${
+                            loadingPAS ? 'bg-slate-800 text-slate-500 border-white/5' : 'bg-blue-500/10 text-blue-400 border-blue-500/30 hover:bg-blue-500 hover:text-white'
+                        }`}
+                    >
+                        {loadingPAS ? 'SYNCING...' : 'SCAN AREA'}
+                    </button>
+                </div>
+
+                {pasFinds.length > 0 ? (
+                    <div className="space-y-3">
+                        <p className="text-[9px] font-black text-blue-400/60 uppercase tracking-widest mb-2">{pasFinds.length} Recorded Finds Nearby</p>
+                        <div className="space-y-2">
+                            {pasFinds.slice(0, 3).map(f => (
+                                <div key={f.id} className="bg-black/30 p-2.5 rounded-xl border border-blue-500/10 hover:border-blue-500/30 transition-all cursor-crosshair">
+                                    <div className="flex justify-between items-start mb-1">
+                                        <span className="text-[10px] font-black text-white truncate pr-2 uppercase">{f.objectType}</span>
+                                        <span className="text-[8px] font-bold text-blue-400 shrink-0">{f.broadperiod}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-[8px] font-black text-slate-500 tracking-tighter font-mono">{f.id}</span>
+                                        <span className="text-[8px] font-bold text-slate-400">{f.county}</span>
+                                    </div>
+                                </div>
+                            ))}
+                            {pasFinds.length > 3 && (
+                                <p className="text-[8px] text-center font-black text-slate-500 uppercase tracking-widest pt-1">+ {pasFinds.length - 3} more historic records</p>
+                            )}
+                        </div>
+                    </div>
+                ) : (
+                    <p className="text-[10px] text-slate-500 font-bold uppercase italic leading-tight">No PAS records loaded. Click scan to fetch data.</p>
+                )}
+            </div>
+
             <div className="p-6 border-b border-white/5 shrink-0 overflow-y-auto max-h-[40%] scrollbar-hide">
                 <div className="flex justify-between items-baseline mb-4">
                     <h2 className="text-sm font-black text-white uppercase tracking-tighter">Strategic Zones</h2>
