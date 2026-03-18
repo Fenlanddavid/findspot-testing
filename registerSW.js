@@ -1,0 +1,1 @@
+if('serviceWorker' in navigator) {window.addEventListener('load', () => {navigator.serviceWorker.register('/findspot-testing/sw.js', { scope: '/findspot-testing/' })})}
