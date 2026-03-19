@@ -10,6 +10,7 @@ export default function GlobalActions({ projectId }: { projectId: string }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [isCapturing, setIsCapturing] = React.useState(false);
+  const [showSuccess, setShowSuccess] = React.useState(false);
   const [lastQuickId, setLastQuickId] = React.useState<string | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   
@@ -90,12 +91,11 @@ export default function GlobalActions({ projectId }: { projectId: string }) {
     });
 
     setIsCapturing(false);
-
-    // Provide direct camera option
-    if (confirm("Quick Find recorded! Add photo now?")) {
-        setLastQuickId(id);
-        setTimeout(() => fileInputRef.current?.click(), 100);
-    }
+    setLastQuickId(id);
+    setShowSuccess(true);
+    
+    // Auto-hide success message after 10 seconds if no action taken
+    setTimeout(() => setShowSuccess(false), 10000);
   }
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -118,7 +118,8 @@ export default function GlobalActions({ projectId }: { projectId: string }) {
             scalePresent: false,
             createdAt: now,
         });
-        alert("Photo added to find!");
+        setShowSuccess(false);
+        if (navigator.vibrate) navigator.vibrate([50, 30, 50]);
     } catch(err) {
         alert("Failed to save photo: " + err);
     } finally {
@@ -128,14 +129,30 @@ export default function GlobalActions({ projectId }: { projectId: string }) {
 
   return (
     <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3 pointer-events-none">
-      <input 
-        type="file" 
-        accept="image/*" 
-        capture="environment" 
-        ref={fileInputRef} 
-        onChange={handleFileChange} 
-        className="hidden" 
-      />
+      {showSuccess && (
+          <div className="pointer-events-auto bg-gray-900/95 backdrop-blur-md text-white p-4 rounded-3xl shadow-2xl flex flex-col gap-3 animate-in slide-in-from-right-4 border border-emerald-500/50 mb-2 min-w-[200px]">
+              <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-full bg-emerald-500 flex items-center justify-center text-[10px] font-black">✓</div>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Recorded</span>
+                  </div>
+                  <button onClick={() => setShowSuccess(false)} className="opacity-40 hover:opacity-100 text-xs">✕</button>
+              </div>
+              <div className="flex gap-2">
+                  <label className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest cursor-pointer shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">
+                      📸 Take Photo
+                      <input type="file" accept="image/*" capture="environment" onChange={handleFileChange} className="hidden" />
+                  </label>
+                  <button 
+                    onClick={() => setShowSuccess(false)}
+                    className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all"
+                  >
+                    Done
+                  </button>
+              </div>
+          </div>
+      )}
+
       {!!pendingCount && pendingCount > 0 && (
          <button 
             onClick={() => navigate("/finds?filter=pending")}

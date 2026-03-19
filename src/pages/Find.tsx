@@ -291,6 +291,11 @@ export default function FindPage(props: {
       if (navigator.vibrate) navigator.vibrate([50, 30, 50]);
 
       setSavedId(id);
+
+      // If we were finishing a quick/pending find, go back home automatically
+      if (props.quickId) {
+          setTimeout(() => navigate("/"), 500);
+      }
     } catch (e: any) {
       setError(e?.message ?? "Save failed");
     } finally {
