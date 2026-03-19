@@ -328,9 +328,12 @@ function HomeRouter({ projectId }: { projectId: string }) {
       goPermissionWithParam={(type: string) => nav(`/permission?type=${type}`)}
       goPermissionEdit={(id: string) => nav(`/permission/${id}`)}
       goPermissions={() => nav("/permissions")}
-      goFind={(permissionId?: string) => {
-        const q = permissionId ? `?permissionId=${encodeURIComponent(permissionId)}` : "";
-        nav(`/find${q}`);
+      goFind={(permissionId?: string, quickId?: string) => {
+        const params = new URLSearchParams();
+        if (permissionId) params.set("permissionId", permissionId);
+        if (quickId) params.set("quickId", quickId);
+        const q = params.toString();
+        nav(`/find${q ? `?${q}` : ""}`);
       }}
       goAllFinds={() => nav("/finds")}
       goFindsWithFilter={(filter: string) => nav(`/finds?${filter}`)}

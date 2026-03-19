@@ -12,7 +12,7 @@ export default function Home(props: {
   goPermissionWithParam: (type: string) => void;
   goPermissionEdit: (id: string) => void;
   goPermissions: () => void;
-  goFind: (permissionId?: string) => void;
+  goFind: (permissionId?: string, quickId?: string) => void;
   goAllFinds: () => void;
   goFindsWithFilter: (filter: string) => void;
   goFindsBox: () => void;
@@ -148,7 +148,7 @@ export default function Home(props: {
                 {pendingFinds.map(f => (
                     <div 
                         key={f.id} 
-                        onClick={() => props.goFind(f.permissionId)} 
+                        onClick={() => props.goFind(f.permissionId, f.id)} 
                         className="min-w-[140px] bg-white dark:bg-gray-800 p-3 rounded-xl border border-amber-200 dark:border-amber-700 shadow-sm cursor-pointer hover:shadow-md transition-all active:scale-95"
                     >
                         <div className="text-[10px] font-black text-amber-600 uppercase mb-1">{f.findCode}</div>

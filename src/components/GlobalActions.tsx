@@ -4,11 +4,14 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../db";
 import { captureGPS } from "../services/gps";
 import { v4 as uuid } from "uuid";
+import { fileToBlob } from "../services/photos";
 
 export default function GlobalActions({ projectId }: { projectId: string }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [isCapturing, setIsCapturing] = React.useState(false);
+  const [lastQuickId, setLastQuickId] = React.useState<string | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
   
   const activeSession = useLiveQuery(
     () => db.sessions.where("isFinished").equals(0).reverse().sortBy("updatedAt").then(sessions => sessions[0]),
@@ -88,14 +91,51 @@ export default function GlobalActions({ projectId }: { projectId: string }) {
 
     setIsCapturing(false);
 
-    // Navigate to photo capture immediately if possible, or just stay here
-    if (confirm("Quick Find recorded with GPS! Add photo now?")) {
-        navigate(`/find?permissionId=${lastPerm.id}&quickId=${id}`);
+    // Provide direct camera option
+    if (confirm("Quick Find recorded! Add photo now?")) {
+        setLastQuickId(id);
+        setTimeout(() => fileInputRef.current?.click(), 100);
+    }
+  }
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !lastQuickId) return;
+
+    try {
+        const blob = await fileToBlob(file);
+        const now = new Date().toISOString();
+        await db.media.add({
+            id: uuid(),
+            projectId,
+            findId: lastQuickId,
+            type: "photo",
+            photoType: "in-situ",
+            filename: file.name,
+            mime: file.type || "application/octet-stream",
+            blob,
+            caption: "Quick Capture",
+            scalePresent: false,
+            createdAt: now,
+        });
+        alert("Photo added to find!");
+    } catch(err) {
+        alert("Failed to save photo: " + err);
+    } finally {
+        setLastQuickId(null);
     }
   }
 
   return (
     <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3 pointer-events-none">
+      <input 
+        type="file" 
+        accept="image/*" 
+        capture="environment" 
+        ref={fileInputRef} 
+        onChange={handleFileChange} 
+        className="hidden" 
+      />
       {!!pendingCount && pendingCount > 0 && (
          <button 
             onClick={() => navigate("/finds?filter=pending")}

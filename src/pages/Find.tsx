@@ -400,15 +400,33 @@ export default function FindPage(props: {
       )}
 
       <div className="grid lg:grid-cols-2 gap-6">
-          <div className={`bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-6 shadow-sm grid gap-5 h-fit transition-opacity ${savedId ? 'opacity-50 pointer-events-none' : ''}`}>
+          <div className={`bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-6 shadow-sm grid gap-5 h-fit transition-opacity ${savedId && !props.quickId ? 'opacity-50 pointer-events-none' : ''}`}>
             <label className="block">
             <div className="mb-1.5 text-sm font-bold text-gray-700 dark:text-gray-300">Location Name / Permission</div>
-            <input 
-                value={locationName} 
-                onChange={(e) => setLocationName(e.target.value)}
-                placeholder="Enter permission or location name"
-                className="w-full bg-white dark:bg-gray-900 border-2 border-gray-100 dark:border-gray-700 rounded-xl p-3 focus:ring-2 focus:ring-emerald-500 outline-none transition-shadow font-bold"
-            />
+            {props.quickId ? (
+                <div className="relative">
+                    <select
+                        value={locationName}
+                        onChange={(e) => setLocationName(e.target.value)}
+                        className="w-full bg-white dark:bg-gray-900 border-2 border-emerald-500 dark:border-emerald-600 rounded-xl p-3 pr-10 focus:ring-2 focus:ring-emerald-500 outline-none transition-shadow font-bold appearance-none shadow-[0_0_10px_rgba(16,185,129,0.1)]"
+                    >
+                        <option value="">(Select Permission)</option>
+                        {permissions?.map(p => (
+                            <option key={p.id} value={p.name}>{p.name}</option>
+                        ))}
+                    </select>
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-emerald-600">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                    </div>
+                </div>
+            ) : (
+                <input 
+                    value={locationName} 
+                    onChange={(e) => setLocationName(e.target.value)}
+                    placeholder="Enter permission or location name"
+                    className="w-full bg-white dark:bg-gray-900 border-2 border-gray-100 dark:border-gray-700 rounded-xl p-3 focus:ring-2 focus:ring-emerald-500 outline-none transition-shadow font-bold"
+                />
+            )}
             </label>
 
             <label className="block">
