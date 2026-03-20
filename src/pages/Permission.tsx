@@ -85,7 +85,17 @@ export default function PermissionPage(props: {
   // Fetch finds for this trip
   const finds = useLiveQuery(async () => {
     if (!id) return [];
-    return db.finds.where("permissionId").equals(id).reverse().sortBy("createdAt");
+    return db.finds.where("permissionId").equals(id).filter(f => !f.isPending).reverse().sortBy("createdAt");
+  }, [id]);
+
+  const pendingFinds = useLiveQuery(async () => {
+    if (!id) return [];
+    return db.finds.where("permissionId").equals(id).filter(f => !!f.isPending).reverse().sortBy("createdAt");
+  }, [id]);
+
+  const standaloneFinds = useLiveQuery(async () => {
+    if (!id) return [];
+    return db.finds.where("permissionId").equals(id).filter(f => !f.isPending && !f.sessionId).reverse().sortBy("createdAt");
   }, [id]);
 
   const sessions = useLiveQuery(async () => {
@@ -1025,8 +1035,147 @@ export default function PermissionPage(props: {
                 )}
             </div>
 
-            {/* Right Column: Sessions List */}
+            {/* Right Column: Sessions & Pending List */}
             <div className="lg:col-span-1 grid gap-6 h-fit">
+                {/* Pending Finds Section */}
+                {isEdit && pendingFinds && pendingFinds.length > 0 && (
+                    <div className="bg-amber-50 dark:bg-amber-900/10 border-2 border-amber-200 dark:border-amber-800/50 rounded-2xl p-6 shadow-sm">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-black text-amber-800 dark:text-amber-400 m-0 uppercase tracking-tight">Pending Finds</h3>
+                            <div className="text-[10px] font-black bg-amber-200 dark:bg-amber-800 text-amber-900 dark:text-amber-100 px-2 py-0.5 rounded-full">{pendingFinds.length}</div>
+                        </div>
+                        <div className="grid gap-3">
+                            {pendingFinds.map(f => (
+                                <button 
+                                    key={f.id}
+                                    onClick={() => nav(`/find?quickId=${f.id}`)}
+                                    className="w-full text-left bg-white dark:bg-gray-800 border border-amber-200 dark:border-amber-800/50 p-3 rounded-xl shadow-sm hover:border-amber-500 transition-all flex items-center gap-3 group"
+                                >
+                                    <div className="w-10 h-10 bg-amber-100 dark:bg-amber-900/50 rounded-lg flex items-center justify-center text-xl">📸</div>
+                                    <div className="min-w-0 flex-1">
+                                        <div className="font-black text-[10px] text-amber-700 dark:text-amber-500 uppercase tracking-widest leading-none mb-1">Quick Recorded</div>
+                                        <div className="text-xs font-bold text-gray-800 dark:text-gray-100 truncate">
+                                            {f.notes || "No notes..."}
+                                        </div>
+                                        <div className="text-[9px] opacity-60 font-mono mt-0.5">
+                                            {new Date(f.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • {f.findCode}
+                                        </div>
+                                    </div>
+                                    <div className="text-amber-400 group-hover:text-amber-600 transition-colors">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                                    </div>
+                                </button>
+                            ))}
+                            <p className="text-[9px] text-amber-700/60 dark:text-amber-400/60 text-center italic mt-1 font-medium">
+                                Tap to add details & assign to a session
+                            </p>
+                        </div>
+                    </div>
+                )}
+
+                {/* Quick Finds Section (Recorded but no session) */}
+                {isEdit && standaloneFinds && standaloneFinds.length > 0 && (
+                    <div className="bg-sky-50 dark:bg-sky-900/10 border-2 border-sky-200 dark:border-sky-800/50 rounded-2xl p-6 shadow-sm">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-black text-sky-800 dark:text-sky-400 m-0 uppercase tracking-tight">Quick Finds</h3>
+                            <div className="text-[10px] font-black bg-sky-200 dark:bg-sky-800 text-sky-900 dark:text-sky-100 px-2 py-0.5 rounded-full">{standaloneFinds.length}</div>
+                        </div>
+                        <div className="grid gap-3">
+                            {standaloneFinds.map(f => {
+                                const thumb = allMedia?.find(m => m.findId === f.id);
+                                return (
+                                    <div key={f.id} className="bg-white dark:bg-gray-800 border border-sky-200 dark:border-sky-800/50 rounded-xl shadow-sm overflow-hidden flex flex-col group">
+                                        <button 
+                                            onClick={() => setOpenFindId(f.id)}
+                                            className="w-full text-left p-3 flex items-center gap-3 hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-all border-b border-gray-50 dark:border-gray-700/50"
+                                        >
+                                            <div className="w-10 h-10 bg-sky-100 dark:bg-sky-900/50 rounded-lg flex items-center justify-center overflow-hidden shrink-0">
+                                                {thumb ? (
+                                                    <ScaledImage media={thumb} className="w-full h-full" imgClassName="object-cover" />
+                                                ) : (
+                                                    <span className="text-xl">💎</span>
+                                                )}
+                                            </div>
+                                            <div className="min-w-0 flex-1">
+                                                <div className="font-black text-[10px] text-sky-700 dark:text-sky-500 uppercase tracking-widest leading-none mb-1">Recorded Find</div>
+                                                <div className="text-xs font-bold text-gray-800 dark:text-gray-100 truncate">
+                                                    {f.objectType}
+                                                </div>
+                                                <div className="text-[9px] opacity-60 font-mono mt-0.5">
+                                                    {new Date(f.createdAt).toLocaleDateString()} • {f.findCode}
+                                                </div>
+                                            </div>
+                                            <div className="text-sky-400 group-hover:text-sky-600 transition-colors">
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                                            </div>
+                                        </button>
+
+                                        {/* Quick Actions Bar */}
+                                        <div className="p-2 bg-gray-50/50 dark:bg-gray-900/30 flex gap-2">
+                                            {sessions && sessions.length > 0 ? (
+                                                <div className="relative flex-1 group/link">
+                                                    <button className="w-full bg-sky-600 text-white text-[9px] font-black py-2 rounded-lg shadow-sm hover:bg-sky-700 transition-all uppercase tracking-widest text-center flex items-center justify-center gap-1">
+                                                        <span>🔗 Link to Visit / Session</span>
+                                                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                                    </button>
+                                                    
+                                                    {/* Session Selection Menu */}
+                                                    <div className="absolute bottom-full left-0 right-0 mb-2 bg-white dark:bg-gray-800 border-2 border-sky-200 dark:border-sky-800 rounded-xl shadow-2xl p-1 hidden group-hover/link:block z-50 animate-in fade-in slide-in-from-bottom-2">
+                                                        <div className="text-[8px] font-black text-sky-600 uppercase p-2 border-b border-gray-50 dark:border-gray-700 mb-1 flex justify-between items-center">
+                                                            <span>Select a Visit</span>
+                                                            <span className="opacity-50">Recent 5</span>
+                                                        </div>
+                                                        <div className="max-h-48 overflow-y-auto">
+                                                            {sessions.slice(0, 5).map((s: any) => (
+                                                                <button 
+                                                                    key={s.id}
+                                                                    onClick={async () => {
+                                                                        if (confirm(`Link this find to the session on ${new Date(s.date).toLocaleDateString()}?`)) {
+                                                                            await db.finds.update(f.id, { 
+                                                                                sessionId: s.id, 
+                                                                                fieldId: s.fieldId || f.fieldId,
+                                                                                isPending: false // Ensure it's fully recorded
+                                                                            });
+                                                                        }
+                                                                    }}
+                                                                    className="w-full text-left p-2.5 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg transition-colors border-b border-gray-50 dark:border-gray-700 last:border-0 group/item"
+                                                                >
+                                                                    <div className="text-[10px] font-black text-gray-800 dark:text-gray-100 group-hover/item:text-emerald-600 transition-colors">
+                                                                        🗓️ {new Date(s.date).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}
+                                                                    </div>
+                                                                    <div className="text-[8px] opacity-60 truncate font-medium">
+                                                                        {s.fieldName || "General Location"} {s.cropType ? `(${s.cropType})` : ""}
+                                                                    </div>
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                        <button 
+                                                            onClick={() => nav(`/session/new?permissionId=${id}`)}
+                                                            className="w-full text-center p-2 mt-1 text-[8px] font-black text-emerald-600 uppercase hover:bg-gray-50 dark:hover:bg-gray-900 rounded-lg transition-colors border-t border-gray-100 dark:border-gray-700"
+                                                        >
+                                                            + Start New Visit Instead
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <button 
+                                                    onClick={() => nav(`/session/new?permissionId=${id}`)}
+                                                    className="w-full bg-emerald-600 text-white text-[9px] font-black py-2 rounded-lg shadow-sm hover:bg-emerald-700 transition-all uppercase tracking-widest text-center"
+                                                >
+                                                    + Create First Visit to Link
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                            <p className="text-[9px] text-sky-700/60 dark:text-sky-400/60 text-center italic mt-1 font-medium px-2 leading-tight">
+                                Tap find to view, or link to a visit below.
+                            </p>
+                        </div>
+                    </div>
+                )}
+
                 {/* Sessions Section */}
                 <div className="bg-gray-50 dark:bg-gray-900/30 border border-gray-200 dark:border-gray-700 rounded-2xl p-6 shadow-inner">
                     <div className="flex justify-between items-center mb-6">

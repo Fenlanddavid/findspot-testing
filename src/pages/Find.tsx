@@ -34,6 +34,7 @@ export default function FindPage(props: {
   const navigate = useNavigate();
   const [locationName, setLocationName] = useState("");
   const [fieldId, setFieldId] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(props.sessionId);
 
   const permissions = useLiveQuery(
     async () => db.permissions.where("projectId").equals(props.projectId).reverse().sortBy("createdAt"),
@@ -41,10 +42,11 @@ export default function FindPage(props: {
   );
 
   const session = useLiveQuery(
-    async () => props.sessionId ? db.sessions.get(props.sessionId) : null,
-    [props.sessionId]
+    async () => sessionId ? db.sessions.get(sessionId) : null,
+    [sessionId]
   );
 
+  // When session changes, lock to its field if it has one
   useEffect(() => {
     if (session?.fieldId) {
       setFieldId(session.fieldId);
@@ -56,9 +58,25 @@ export default function FindPage(props: {
     return permissions?.find(p => p.name === locationName)?.id || null;
   }, [props.permissionId, permissions, locationName]);
 
+  // Reset field/session if permission changes
+  useEffect(() => {
+    if (currentPermissionId) {
+        // If the current session or field doesn't belong to this permission, reset them
+        if (session && session.permissionId !== currentPermissionId) {
+            setSessionId(null);
+            setFieldId(null);
+        }
+    }
+  }, [currentPermissionId]);
+
   const fields = useLiveQuery(async () => {
     if (!currentPermissionId) return [];
     return db.fields.where("permissionId").equals(currentPermissionId).toArray();
+  }, [currentPermissionId]);
+
+  const availableSessions = useLiveQuery(async () => {
+    if (!currentPermissionId) return [];
+    return db.sessions.where("permissionId").equals(currentPermissionId).reverse().sortBy("date");
   }, [currentPermissionId]);
 
   const [findCode, setFindCode] = useState(makeFindCode());
@@ -124,12 +142,13 @@ export default function FindPage(props: {
             if (grid) setOsGridRef(grid);
             setNotes(f.notes);
             
-            // If it came with a permission already
             if (f.permissionId) {
                 db.permissions.get(f.permissionId).then(p => {
                     if (p) setLocationName(p.name);
                 });
             }
+            if (f.sessionId) setSessionId(f.sessionId);
+            if (f.fieldId) setFieldId(f.fieldId);
         }
       });
     }
@@ -245,7 +264,7 @@ export default function FindPage(props: {
         projectId: props.projectId,
         permissionId: targetPermissionId,
         fieldId,
-        sessionId: props.sessionId,
+        sessionId,
         findCode: findCode.trim() || makeFindCode(),
         objectType: objectType.trim(),
         coinType: coinType.trim(),
@@ -436,15 +455,37 @@ export default function FindPage(props: {
 
             <label className="block">
               <div className="mb-1.5 text-sm font-bold text-gray-700 dark:text-gray-300 flex justify-between">
-                <span>Field / Area</span>
+                <span>Session / Visit</span>
                 {props.sessionId && (
+                    <span className="text-[10px] text-emerald-600 font-black uppercase tracking-widest">Locked to Session</span>
+                )}
+              </div>
+              <select 
+                value={sessionId ?? ""} 
+                onChange={(e) => setSessionId(e.target.value || null)}
+                disabled={!!props.sessionId}
+                className="w-full bg-white dark:bg-gray-900 border-2 border-gray-100 dark:border-gray-700 rounded-xl p-3 focus:ring-2 focus:ring-emerald-500 outline-none transition-shadow font-medium disabled:opacity-50"
+              >
+                <option value="">(No specific session)</option>
+                {availableSessions?.map(s => (
+                  <option key={s.id} value={s.id}>
+                      {new Date(s.date).toLocaleDateString()} {s.cropType ? `(${s.cropType})` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <div className="mb-1.5 text-sm font-bold text-gray-700 dark:text-gray-300 flex justify-between">
+                <span>Field / Area</span>
+                {session?.fieldId && (
                   <span className="text-[10px] text-emerald-600 font-black uppercase tracking-widest">Locked to Session</span>
                 )}
               </div>
               <select 
                 value={fieldId ?? ""} 
                 onChange={(e) => setFieldId(e.target.value || null)}
-                disabled={!!props.sessionId}
+                disabled={!!session?.fieldId}
                 className="w-full bg-white dark:bg-gray-900 border-2 border-gray-100 dark:border-gray-700 rounded-xl p-3 focus:ring-2 focus:ring-emerald-500 outline-none transition-shadow font-medium disabled:opacity-50"
               >
                 <option value="">(No specific field)</option>
