@@ -7,6 +7,7 @@ import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { FindRow } from "../components/FindRow";
 import { FindModal } from "../components/FindModal";
+import { ScaledImage } from "../components/ScaledImage";
 import { PermissionReport } from "../components/PermissionReport";
 import { AgreementModal } from "../components/AgreementModal";
 import { LocationPickerModal } from "../components/LocationPickerModal";
