@@ -900,27 +900,6 @@ export default function PermissionPage(props: {
                         </div>
                     </div>
 
-                    {agreementFile && (
-                      <div className="bg-emerald-50 dark:bg-emerald-900/10 border-2 border-emerald-100 dark:border-emerald-800/50 p-4 rounded-2xl flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <span className="text-2xl">📄</span>
-                          <div>
-                            <p className="text-sm font-black text-emerald-800 dark:text-emerald-400">Signed Landowner Agreement</p>
-                            <p className="text-[10px] opacity-60 font-mono italic">{agreementFile.filename}</p>
-                          </div>
-                        </div>
-                        <button 
-                          onClick={() => {
-                            const url = URL.createObjectURL(agreementFile.blob);
-                            window.open(url, "_blank");
-                          }}
-                          className="bg-white dark:bg-gray-800 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 px-4 py-2 rounded-xl text-xs font-bold shadow-sm hover:shadow-md transition-all"
-                        >
-                          View PDF ↗
-                        </button>
-                      </div>
-                    )}
-
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                                 <div className="grid gap-4">
                                     <div>
