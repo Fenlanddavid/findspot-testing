@@ -57,6 +57,20 @@ function Shell() {
     ensureDefaultProject().then(setProjectId);
     requestPersistentStorage();
 
+    // Track unique installation (one-time per device)
+    const trackInstallation = async () => {
+      const isInstalled = localStorage.getItem("fs_installed");
+      if (!isInstalled) {
+        try {
+          await fetch("https://api.counterapi.dev/v1/findspot-uk/installs/up");
+          localStorage.setItem("fs_installed", "true");
+        } catch (e) {
+          console.error("Installation tracking failed", e);
+        }
+      }
+    };
+    trackInstallation();
+
     // Detect Standalone mode
     const isPWA = window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone;
     setIsStandalone(!!isPWA);
