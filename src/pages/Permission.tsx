@@ -13,6 +13,7 @@ import { AgreementModal } from "../components/AgreementModal";
 import { LocationPickerModal } from "../components/LocationPickerModal";
 import { BoundaryPickerModal } from "../components/BoundaryPickerModal";
 import { FieldModal } from "../components/FieldModal";
+import PermissionProofModal from "../components/PermissionProofModal";
 import { calculateCoverage, CoverageResult } from "../services/coverage";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -45,8 +46,8 @@ export default function PermissionPage(props: {
 
   const [landType, setLandType] = useState<Permission["landType"]>("arable");
   const [permissionGranted, setPermissionGranted] = useState(false);
-  const [ncmdNumber, setNcmdNumber] = useState("");
-  const [ncmdExpiry, setNcmdExpiry] = useState("");
+  const [validFrom, setValidFrom] = useState("");
+  const [ncmdNumber, setNcmdNumber] = useState("");  const [ncmdExpiry, setNcmdExpiry] = useState("");
   const [detectoristName, setDetectoristName] = useState("");
   const [detectoristEmail, setDetectoristEmail] = useState("");
 
@@ -68,6 +69,7 @@ export default function PermissionPage(props: {
   const [coverageResult, setCoverageResult] = useState<CoverageResult | null>(null);
   const [agreementId, setAgreementId] = useState<string | undefined>();
   const [agreementModalOpen, setAgreementModalOpen] = useState(false);
+  const [proofModalOpen, setProofModalOpen] = useState(false);
   
   const [openFindId, setOpenFindId] = useState<string | null>(null);
   const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
@@ -430,8 +432,8 @@ export default function PermissionPage(props: {
           setLandownerAddress(l.landownerAddress || "");
           setLandType(l.landType);
           setPermissionGranted(l.permissionGranted);
-          setBoundary(l.boundary);
-          setAgreementId((l as any).agreementId);
+          setValidFrom(l.validFrom || "");
+          setBoundary(l.boundary);          setAgreementId((l as any).agreementId);
           setNotes(l.notes);
         }
         setLoading(false);
@@ -510,10 +512,10 @@ export default function PermissionPage(props: {
         landownerAddress,
         landType,
         permissionGranted,
+        validFrom,
         boundary,
         agreementId,
-        notes,
-        createdAt: isEdit ? undefined as any : now, 
+        notes,        createdAt: isEdit ? undefined as any : now, 
         updatedAt: now,
       };
 
@@ -578,7 +580,7 @@ export default function PermissionPage(props: {
   const currentPermission: Permission | null = id ? {
     id, projectId: props.projectId, name, type, lat, lon, gpsAccuracyM: acc, collector,
     landownerName, landownerPhone, landownerEmail, landownerAddress,
-    landType, permissionGranted, notes,
+    landType, permissionGranted, validFrom, notes,
     createdAt: "", updatedAt: ""
   } : null;
 
@@ -826,16 +828,29 @@ export default function PermissionPage(props: {
                             )}
                         </div>
                         <label className="flex items-center gap-2 cursor-pointer group w-fit">
-                            <input 
-                                type="checkbox" 
-                                checked={permissionGranted} 
+                            <input
+                                type="checkbox"
+                                checked={permissionGranted}
                                 onChange={(e) => setPermissionGranted(e.target.checked)}
                                 className="w-5 h-5 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
                             />
                             <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-emerald-600 transition-colors">Permission Granted?</span>
                         </label>
-                    </div>
 
+                        {permissionGranted && (
+                            <div className="pt-2 animate-in fade-in slide-in-from-top-2">
+                                <label className="block">
+                                    <div className="mb-1 text-[10px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400">Valid From (Date of Agreement)</div>
+                                    <input 
+                                        type="date"
+                                        value={validFrom}
+                                        onChange={(e) => setValidFrom(e.target.value)}
+                                        className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                                    />
+                                </label>
+                            </div>
+                        )}
+                        </div>
                     <label className="block">
                     <div className="mb-2 text-sm font-bold text-gray-700 dark:text-gray-300">Land/Farm Notes</div>
                     <textarea 
@@ -876,8 +891,7 @@ export default function PermissionPage(props: {
                         <div className="flex flex-wrap gap-2 items-center justify-end">
                           <div className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl border-2 flex items-center gap-2 font-black text-[10px] sm:text-sm whitespace-nowrap h-fit ${permissionGranted ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-red-50 border-red-100 text-red-700'}`}>
                               {permissionGranted ? '✓ PERMISSION GRANTED' : '⚠️ NO PERMISSION'}
-                          </div>
-                          <button 
+                          </div>                          <button 
                               onClick={() => setAgreementModalOpen(true)}
                               className="text-[10px] sm:text-xs font-black bg-white dark:bg-gray-800 border-2 border-gray-100 dark:border-gray-700 px-3 py-2 rounded-xl text-gray-600 dark:text-gray-400 hover:border-emerald-500 hover:text-emerald-600 transition-all flex items-center gap-1 shadow-sm h-fit"
                           >
@@ -907,52 +921,66 @@ export default function PermissionPage(props: {
                       </div>
                     )}
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        <div className="grid gap-4">
-                            <div>
-                                <h4 className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-1">Landowner / Contact</h4>
-                                <p className="font-bold text-gray-700 dark:text-gray-300">{landownerName || "Not recorded"}</p>
-                                {landownerPhone && <p className="text-sm opacity-60">📞 {landownerPhone}</p>}
-                                {landownerEmail && <p className="text-sm opacity-60">✉️ {landownerEmail}</p>}
-                                {landownerAddress && <p className="text-sm opacity-60 mt-1 italic">📍 {landownerAddress}</p>}
-                            </div>
-                            <div>
-                                <h4 className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-1">Land Details</h4>
-                                <p className="font-bold text-gray-700 dark:text-gray-300 capitalize">
-                                    {landType}
-                                </p>
-                            </div>
-                        </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                <div className="grid gap-4">
+                                    <div>
+                                        <h4 className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-1 text-emerald-600 dark:text-emerald-400">Landowner / Contact</h4>
+                                        <p className="font-bold text-gray-700 dark:text-gray-300">{landownerName || "Not recorded"}</p>
+                                        {landownerPhone && <p className="text-sm opacity-60">📞 {landownerPhone}</p>}
+                                        {landownerEmail && <p className="text-sm opacity-60">✉️ {landownerEmail}</p>}
+                                        {landownerAddress && <p className="text-sm opacity-60 mt-1 italic">📍 {landownerAddress}</p>}
+                                    </div>
+                                    <div>
+                                        <h4 className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-1 text-emerald-600 dark:text-emerald-400">Land Details</h4>
+                                        <div className="flex justify-between items-center">
+                                            <p className="font-bold text-gray-700 dark:text-gray-300 capitalize">
+                                                {landType}
+                                            </p>
+                                            {validFrom && (
+                                                <div className="text-right">
+                                                    <h4 className="text-[10px] font-black uppercase tracking-widest opacity-40 text-emerald-600 dark:text-emerald-400">Valid From</h4>
+                                                    <p className="text-xs font-bold text-gray-700 dark:text-gray-300">{new Date(validFrom).toLocaleDateString()}</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
 
-                        <div className="grid gap-4">
-                            <div>
-                                <h4 className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-1">Base Location</h4>
-                                {lat && lon ? (
-                                    <div className="flex flex-col gap-1">
-                                        <p className="font-mono font-bold text-emerald-600">{lat.toFixed(6)}, {lon.toFixed(6)}</p>
+                                <div className="grid gap-4">
+                                    <div>
+                                        <h4 className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-1 text-emerald-600 dark:text-emerald-400">Base Location</h4>
+                                        {lat && lon ? (
+                                            <div className="flex flex-col gap-1">
+                                                <p className="font-mono font-bold text-emerald-600">{lat.toFixed(6)}, {lon.toFixed(6)}</p>
+                                                <button 
+                                                    onClick={() => window.open(`https://www.google.com/maps?q=${lat},${lon}`, "_blank")}
+                                                    className="text-[10px] font-bold text-gray-400 hover:text-emerald-600 transition-colors flex items-center gap-1"
+                                                >
+                                                    View on Google Maps ↗
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <p className="text-sm opacity-40 italic">Coordinates not set</p>
+                                        )}
+                                    </div>
+                                    <div className="relative">
+                                        <h4 className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-1 text-emerald-600 dark:text-emerald-400">Default Detectorist</h4>
+                                        <p className="font-bold text-gray-700 dark:text-gray-300">{collector || "Not set"}</p>
+                                        {(ncmdNumber || ncmdExpiry) && (
+                                            <div className="mt-1 text-[10px] font-bold text-emerald-600 flex flex-wrap gap-x-3">
+                                                {ncmdNumber && <span>NCMD: {ncmdNumber}</span>}
+                                                {ncmdExpiry && <span>Exp: {new Date(ncmdExpiry).toLocaleDateString()}</span>}
+                                            </div>
+                                        )}
                                         <button 
-                                            onClick={() => window.open(`https://www.google.com/maps?q=${lat},${lon}`, "_blank")}
-                                            className="text-[10px] font-bold text-gray-400 hover:text-emerald-600 transition-colors flex items-center gap-1"
+                                            onClick={() => setProofModalOpen(true)}
+                                            className="absolute bottom-0 right-0 text-xs font-black text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-3 py-1.5 rounded-lg border-2 border-emerald-100 dark:border-emerald-800 hover:bg-emerald-100 transition-all flex items-center gap-1 shadow-sm"
                                         >
-                                            View on Google Maps ↗
+                                            🛡️ PROOF
                                         </button>
                                     </div>
-                                ) : (
-                                    <p className="text-sm opacity-40 italic">Coordinates not set</p>
-                                )}
+                                </div>
                             </div>
-                            <div>
-                                <h4 className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-1">Default Detectorist</h4>
-                                <p className="font-bold text-gray-700 dark:text-gray-300">{collector || "Not set"}</p>
-                                {(ncmdNumber || ncmdExpiry) && (
-                                    <div className="mt-1 text-[10px] font-bold text-emerald-600 flex flex-wrap gap-x-3">
-                                        {ncmdNumber && <span>NCMD: {ncmdNumber}</span>}
-                                        {ncmdExpiry && <span>Exp: {new Date(ncmdExpiry).toLocaleDateString()}</span>}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    </div>
 
                     {notes && (
                         <div className="bg-gray-50 dark:bg-gray-900/50 p-6 rounded-2xl border border-gray-100 dark:border-gray-800">
@@ -1322,6 +1350,16 @@ export default function PermissionPage(props: {
                setEditingFieldId(null);
              }}
          />
+      )}
+
+      {proofModalOpen && currentPermission && (
+        <PermissionProofModal 
+          permission={{...currentPermission, id: id!}}
+          agreementFile={agreementFile || null}
+          ncmdNumber={ncmdNumber}
+          ncmdExpiry={ncmdExpiry}
+          onClose={() => setProofModalOpen(false)}
+        />
       )}
 
     </div>

@@ -45,6 +45,7 @@ export default function Settings() {
   const [defaultDetector, setDefaultDetector] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
   const [customModel, setCustomModel] = useState("");
+  const [installCount, setInstallCount] = useState<number | null>(null);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
@@ -57,6 +58,12 @@ export default function Settings() {
     getSetting("theme", "dark").then(setTheme);
     getSetting("detectors", ["Minelab Equinox 800", "Nokta Legend"]).then(setDetectors);
     getSetting("defaultDetector", "").then(setDefaultDetector);
+
+    // Fetch Community Stats
+    fetch("https://api.counterapi.dev/v1/findspot-uk-test/installs/")
+      .then(res => res.json())
+      .then(data => setInstallCount(data.count))
+      .catch(() => setInstallCount(null));
   }, []);
 
   async function handleRequestPersistence() {
@@ -342,6 +349,13 @@ export default function Settings() {
             There are no servers, no tracking, and no cloud synchronization. Your find spots are your secrets.
           </p>
         </section>
+
+        {installCount !== null && (
+          <div className="mt-2 flex justify-end items-center gap-1 opacity-20 hover:opacity-60 transition-opacity cursor-default pr-2">
+            <span className="text-[8px] font-black uppercase tracking-widest text-emerald-800 dark:text-emerald-400">#</span>
+            <span className="text-[9px] font-black text-emerald-900 dark:text-emerald-200 tabular-nums">{installCount.toLocaleString()}</span>
+          </div>
+        )}
       </div>
     </div>
   );

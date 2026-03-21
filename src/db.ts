@@ -44,6 +44,8 @@ export type Permission = {
 
   notes: string;
 
+  validFrom?: string; // ISO date string
+
   createdAt: string;
   updatedAt: string;
 };
@@ -200,7 +202,7 @@ export class FindSpotDB extends Dexie {
   settings!: Table<Setting, string>;
 
   constructor() {
-    super("findspot_uk");
+    super("findspot_uk_test");
 
     this.version(1).stores({
       projects: "id, name, region, createdAt",
@@ -315,6 +317,10 @@ export class FindSpotDB extends Dexie {
 
     this.version(13).stores({
       finds: "id, projectId, permissionId, fieldId, sessionId, findCode, objectType, isFavorite, isPending, targetId, detector, ruler, dateRange, createdAt",
+    });
+
+    this.version(14).stores({
+      permissions: "id, projectId, name, type, permissionGranted, boundary, validFrom, createdAt",
     });
   }
 }
