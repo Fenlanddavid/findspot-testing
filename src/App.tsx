@@ -59,21 +59,25 @@ function Shell() {
 
     // Track unique installation (one-time per device)
     const trackInstallation = async () => {
-      const isInstalled = localStorage.getItem("fs_installed");
-      if (!isInstalled) {
-        try {
+      try {
+        const isInstalled = localStorage.getItem("fs_installed");
+        if (!isInstalled) {
           await fetch("https://api.counterapi.dev/v1/findspot-uk/installs/up");
           localStorage.setItem("fs_installed", "true");
-        } catch (e) {
-          console.error("Installation tracking failed", e);
         }
+      } catch (e) {
+        console.error("Installation tracking failed", e);
       }
     };
     trackInstallation();
 
     // Detect Standalone mode
-    const isPWA = window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone;
-    setIsStandalone(!!isPWA);
+    try {
+      const isPWA = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || (navigator as any).standalone;
+      setIsStandalone(!!isPWA);
+    } catch (e) {
+      setIsStandalone(true);
+    }
     
     // Detect In-App Browsers (Facebook, Instagram, etc.)
     const ua = navigator.userAgent || navigator.vendor || (window as any).opera;

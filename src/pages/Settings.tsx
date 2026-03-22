@@ -56,13 +56,22 @@ export default function Settings() {
     getSetting("ncmdExpiry", "").then(setNcmdExpiry);
     getSetting("lastBackupDate", null).then(setLastBackup);
     getSetting("theme", "dark").then(setTheme);
-    getSetting("detectors", ["Minelab Equinox 800", "Nokta Legend"]).then(setDetectors);
+    getSetting("detectors", ["Minelab Equinox 800", "Nokta Legend"]).then(val => {
+      if (Array.isArray(val)) setDetectors(val);
+      else setDetectors(["Minelab Equinox 800", "Nokta Legend"]);
+    });
     getSetting("defaultDetector", "").then(setDefaultDetector);
 
     // Fetch Community Stats
     fetch("https://api.counterapi.dev/v1/findspot-uk/installs/")
-      .then(res => res.json())
-      .then(data => setInstallCount(data.count))
+      .then(res => res.ok ? res.json() : Promise.reject())
+      .then(data => {
+        if (data && typeof data.count === 'number') {
+          setInstallCount(data.count);
+        } else {
+          setInstallCount(null);
+        }
+      })
       .catch(() => setInstallCount(null));
   }, []);
 
@@ -155,7 +164,7 @@ export default function Settings() {
             <div>
               <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Your Detectors</label>
               <div className="flex flex-wrap gap-2 mb-4">
-                {detectors.length === 0 ? (
+                {!Array.isArray(detectors) || detectors.length === 0 ? (
                   <p className="text-xs text-gray-400 italic">No detectors added yet.</p>
                 ) : (
                   detectors.map(d => (
@@ -219,7 +228,7 @@ export default function Settings() {
                 className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-2 focus:ring-2 focus:ring-emerald-500 outline-none"
               >
                 <option value="">(None)</option>
-                {detectors.map(d => (
+                {Array.isArray(detectors) && detectors.map(d => (
                   <option key={d} value={d}>{d}</option>
                 ))}
               </select>
@@ -350,7 +359,7 @@ export default function Settings() {
           </p>
         </section>
 
-        {installCount !== null && (
+        {typeof installCount === 'number' && (
           <div className="mt-2 flex justify-end items-center gap-1 opacity-20 hover:opacity-60 transition-opacity cursor-default pr-2">
             <span className="text-[8px] font-black uppercase tracking-widest text-emerald-800 dark:text-emerald-400">#</span>
             <span className="text-[9px] font-black text-emerald-900 dark:text-emerald-200 tabular-nums">{installCount.toLocaleString()}</span>
