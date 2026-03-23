@@ -380,7 +380,7 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
     if (nearbyHeritage.length > 0) reasons.push(`${nearbyHeritage.length} historic features nearby`);
     if (nearbyMonuments.length > 0) reasons.push("Adjacent to Scheduled Monument");
 
-    // 4. Etymological Signals (with RARITY WEIGHTING)
+    // 4. Etymological Signals (with RARITY WEIGHTING & DISTANCE DECAY)
     let signalPoints = 0;
     const nearbySignals = signals.filter(s => s.distance < 2.0);
     
@@ -391,13 +391,19 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
         else if (s.name.toLowerCase().includes('bury') || s.name.toLowerCase().includes('burgh')) weight = 1.5; // Fortified (Strong)
         else if (s.name.toLowerCase().includes('field') || s.name.toLowerCase().includes('acre')) weight = 0.8; // Common land (Common)
         
-        signalPoints += Math.round(s.confidence * 20 * weight);
+        // 5. ETYMOLOGY ENGINE → ADD DISTANCE DECAY
+        let distFactor = 1.0;
+        if (s.distance < 0.5) distFactor = 1.0;
+        else if (s.distance < 1.5) distFactor = 0.5;
+        else distFactor = 0.2;
+
+        signalPoints += Math.round(s.confidence * 20 * weight * distFactor);
     });
     signalPoints = Math.min(100, signalPoints);
 
     if (nearbySignals.length > 0) {
         const bestSignal = [...nearbySignals].sort((a, b) => b.confidence - a.confidence)[0];
-        reasons.push(`Strong signal: ${bestSignal.name} (${bestSignal.meaning})`);
+        reasons.push(`Local signal: ${bestSignal.name} (${bestSignal.meaning})`);
     }
 
     // CALCULATE FINAL WEIGHTED SCORE
@@ -414,11 +420,14 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
         }
     });
 
-    // SCAN CONFIDENCE CALCULATION
+    // 4. DATA DESERT LOGIC → UPDATE
+    // Low confidence if no historical support AND only terrain anomalies
     let confidence: 'High' | 'Medium' | 'Low' = 'Medium';
-    const dataPoints = pas.length + signals.length + monuments.length;
-    if (dataPoints > 10) confidence = 'High';
-    else if (dataPoints < 3) confidence = 'Low';
+    const hasHistoricSupport = historicPoints > 0 || signalPoints > 15;
+    
+    if (hasHistoricSupport && (pas.length + signals.length) > 5) confidence = 'High';
+    else if (!hasHistoricSupport) confidence = 'Low'; // Data Desert (Terrain only)
+    
     setScanConfidence(confidence);
   };
 
@@ -1236,12 +1245,17 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
            // A. ANOMALY SCORE (0-40) - WEIGHTED
            const sources = new Set(members.flatMap(m => m.sources));
            const hasLidar = sources.has('terrain') || sources.has('terrain_global');
-           const hasSatellite = sources.has('satellite_spring') || sources.has('satellite_summer');
+           const hasSatellite = (sources.has('satellite_spring') || sources.has('satellite_summer')) && !sources.has('terrain');
            const hasHydrology = sources.has('hydrology');
 
            if (hasLidar) {
                const bestLidar = members.find(m => m.sources.includes('terrain') || m.sources.includes('terrain_global'));
                let lidarScore = bestLidar?.confidence === 'High' ? 18 : (bestLidar?.confidence === 'Medium' ? 10 : 5);
+               
+               // 1. RELIABILITY MATRIX → ADD INTERACTION WEIGHTING
+               if (hasHydrology) { lidarScore += 5; explanation.push("LiDAR + Hydrology correlation"); }
+               if (sources.has('satellite_summer')) { lidarScore += 4; explanation.push("LiDAR + Spectral agreement"); }
+               
                anomaly += lidarScore;
                explanation.push("Reliable LiDAR relief signature");
            }
@@ -1249,26 +1263,36 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
            if (hasSatellite) {
                const hasSummer = sources.has('satellite_summer');
                const hasSpring = sources.has('satellite_spring');
-               let satScore = (hasSummer && hasSpring) ? 15 : (hasSummer ? 7 : 3);
+               // Weaker combinations: minimal boost for sat+sat alone
+               let satScore = (hasSummer && hasSpring) ? 10 : (hasSummer ? 6 : 3);
                anomaly += satScore;
-               explanation.push(hasSummer && hasSpring ? "Verified multi-temporal cropmark" : "Spectral vegetation anomaly");
+               explanation.push("Spectral vegetation anomaly");
            }
 
            // B. CONTEXT SCORE (0-20)
            const center = c.center;
            const isRaised = members.some(m => m.polarity === 'Raised');
-           if (isRaised) { context += 8; explanation.push("Raised dry footing"); }
+           if (isRaised) { 
+               context += 8; 
+               explanation.push("Raised dry footing"); 
+               // Interaction Bonus
+               if (hasHydrology) { context += 4; explanation.push("Strategic dry point near water"); }
+           }
 
            // C. HYDROLOGY → EXTEND INTO BEHAVIOUR LAYER
+           // 2. HYDROLOGY BONUSES → REBALANCE (Base reduced slightly)
            if (hasHydrology) {
-               anomaly += 7;
+               anomaly += 5;
                // Behavioural Hydrology
                if (isRaised) { 
-                   behaviour += 8; 
+                   // Extra bonus if convergence exists
+                   const convergenceBonus = hasLidar ? 4 : 0;
+                   behaviour += (6 + convergenceBonus); 
                    explanation.push("Island effect: Dry ground in wet zone"); 
                }
                if (members.some(m => m.type.includes('Corridor'))) {
-                   behaviour += 7;
+                   const corridorBonus = hasLidar ? 3 : 0;
+                   behaviour += (5 + corridorBonus);
                    explanation.push("Historic river crossing / Ford potential");
                }
            }
@@ -1288,10 +1312,15 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
            // FINAL CALCULATION
            const score = Math.min(98, Math.max(0, anomaly + context + convergence + behaviour + penalty));
 
+           // 3. CONFIDENCE DECAY → APPLY GLOBALLY
            let confidence: Hotspot['confidence'] = 'Weak';
-           if (score > 85) confidence = 'Elite';
-           else if (score > 65) confidence = 'Strong';
+           if (score > 85 && sources.size >= 3) confidence = 'Elite';
+           else if (score > 65 && sources.size >= 2) confidence = 'Strong';
            else if (score > 40) confidence = 'Moderate';
+           
+           // Downgrade if no behavioural logic or context support
+           if (confidence === 'Strong' && behaviour < 5 && context < 5) confidence = 'Moderate';
+           if (confidence === 'Elite' && behaviour < 8) confidence = 'Strong';
 
            let type: Hotspot['type'] = 'Field Activity Zone';
            if (hasHydrology && isRaised) type = 'Raised Dry Point';
