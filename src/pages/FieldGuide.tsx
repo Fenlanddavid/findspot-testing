@@ -177,7 +177,17 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
   const [selectedPASFind, setSelectedPASFind] = useState<PASFind | null>(null);
   const [loadingPAS, setLoadingPAS] = useState(false);
   const [placeSignals, setPlaceSignals] = useState<PlaceSignal[]>([]);
-  const [potentialScore, setPotentialScore] = useState<{score: number, reasons: string[]} | null>(null);
+  const [potentialScore, setPotentialScore] = useState<{
+    score: number, 
+    reasons: string[],
+    breakdown?: {
+        terrain: number, // 0-100
+        hydro: number,   // 0-100
+        historic: number,// 0-100
+        signals: number  // 0-100
+    }
+  } | null>(null);
+  const [scanConfidence, setScanConfidence] = useState<'High' | 'Medium' | 'Low' | null>(null);
   const [monumentPoints, setMonumentPoints] = useState<[number, number][]>([]);
 
   const navigate = useNavigate();
@@ -348,45 +358,68 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
   const calculatePotentialScore = (pas: PASFind[], monuments: [number, number][], signals: PlaceSignal[]) => {
     if (!mapRef.current) return;
     const center = mapRef.current.getCenter();
-    let score = 25; 
     const reasons: string[] = [];
 
-    // 1. Proximity to OSM Heritage Features
-    const nearbyHeritage = pas.filter(f => {
-        const dist = getDistancePAS(center.lat, center.lng, f.lat, f.lon);
-        return dist < 1.5; // 1.5km radius
-    });
+    // 1. Terrain/Anomaly Potential (Derived from general surroundings)
+    let terrainPoints = 20; // Base terrain potential
 
-    if (nearbyHeritage.length >= 3) {
-        score += 45;
-        reasons.push(`${nearbyHeritage.length} heritage features within 1.5km`);
-    } else if (nearbyHeritage.length > 0) {
-        score += 25;
-        reasons.push(`Heritage sites detected in vicinity`);
-    }
+    // 2. Hydrology Strength
+    const nearbyHydroSignals = signals.filter(s => (s.type.includes('stream') || s.type.includes('river') || s.type.includes('water')) && s.distance < 1.0);
+    const hydroScore = Math.min(100, nearbyHydroSignals.length * 30 + 10);
+    if (nearbyHydroSignals.length > 0) reasons.push("Strategic water proximity");
 
-    // 2. Proximity to Scheduled Monuments (High Weight)
-    const nearbyMonuments = monuments.filter(m => {
-        const dist = getDistancePAS(center.lat, center.lng, m[1], m[0]);
-        return dist < 0.6; // 600m radius
-    });
+    // 3. Historic Proximity (OSM + NHLE)
+    const nearbyHeritage = pas.filter(f => getDistancePAS(center.lat, center.lng, f.lat, f.lon) < 1.5);
+    const nearbyMonuments = monuments.filter(m => getDistancePAS(center.lat, center.lng, m[1], m[0]) < 0.6);
+    
+    let historicPoints = 0;
+    if (nearbyHeritage.length >= 3) historicPoints += 45;
+    else if (nearbyHeritage.length > 0) historicPoints += 25;
+    if (nearbyMonuments.length > 0) historicPoints += 35;
 
-    if (nearbyMonuments.length > 0) {
-        score += 35;
-        reasons.push("Adjacent to Scheduled Monument");
-    }
+    if (nearbyHeritage.length > 0) reasons.push(`${nearbyHeritage.length} historic features nearby`);
+    if (nearbyMonuments.length > 0) reasons.push("Adjacent to Scheduled Monument");
 
-    // 3. Etymological Signals
+    // 4. Etymological Signals (with RARITY WEIGHTING)
+    let signalPoints = 0;
     const nearbySignals = signals.filter(s => s.distance < 2.0);
+    
+    nearbySignals.forEach(s => {
+        // Rarity Weighting Logic
+        let weight = 1.0;
+        if (s.name.toLowerCase().includes('chester') || s.name.toLowerCase().includes('caster')) weight = 2.0; // Roman Fort (Rare)
+        else if (s.name.toLowerCase().includes('bury') || s.name.toLowerCase().includes('burgh')) weight = 1.5; // Fortified (Strong)
+        else if (s.name.toLowerCase().includes('field') || s.name.toLowerCase().includes('acre')) weight = 0.8; // Common land (Common)
+        
+        signalPoints += Math.round(s.confidence * 20 * weight);
+    });
+    signalPoints = Math.min(100, signalPoints);
+
     if (nearbySignals.length > 0) {
         const bestSignal = [...nearbySignals].sort((a, b) => b.confidence - a.confidence)[0];
-        score += Math.round(bestSignal.confidence * 20);
-        reasons.push(`Significant etymological signal: ${bestSignal.name}`);
+        reasons.push(`Strong signal: ${bestSignal.name} (${bestSignal.meaning})`);
     }
 
-    // Cap at 98%
-    const finalScore = Math.min(score, 98);
-    setPotentialScore({ score: finalScore, reasons });
+    // CALCULATE FINAL WEIGHTED SCORE
+    const finalScore = Math.min(98, Math.max(15, (terrainPoints * 0.2) + (hydroScore * 0.2) + (historicPoints * 0.4) + (signalPoints * 0.2)));
+
+    setPotentialScore({ 
+        score: Math.round(finalScore), 
+        reasons,
+        breakdown: {
+            terrain: terrainPoints,
+            hydro: hydroScore,
+            historic: Math.min(100, historicPoints),
+            signals: signalPoints
+        }
+    });
+
+    // SCAN CONFIDENCE CALCULATION
+    let confidence: 'High' | 'Medium' | 'Low' = 'Medium';
+    const dataPoints = pas.length + signals.length + monuments.length;
+    if (dataPoints > 10) confidence = 'High';
+    else if (dataPoints < 3) confidence = 'Low';
+    setScanConfidence(confidence);
   };
 
   // Simple Haversine distance in km
@@ -1031,45 +1064,62 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
           let found = false;
           for (const m of merged) {
               const dist = getDistance(c.center, m.center);
+              
+              // 3. VECTOR STITCHING → ADD CONFIDENCE DECAY
               const angleDiff = Math.abs((c.bearing || 0) - (m.bearing || 0));
               const isAligned = angleDiff < 15 || angleDiff > 165; // Similarly oriented
+              
+              // Confidence Decay for long-distance linking
+              const gapLimit = 60;
+              const canStitch = isAligned && dist < gapLimit && c.metrics!.ratio > 3.0 && m.metrics!.ratio > 3.0;
 
-              if (dist < thresholdM || (dist < 80 && isAligned && c.metrics!.ratio > 3.0 && m.metrics!.ratio > 3.0)) {
-                  // MULTISPECTRAL AGGREGATION: Keep all raw sources for detailed UI display
+              if (dist < thresholdM || canStitch) {
+                  // MULTISPECTRAL AGGREGATION
                   c.sources.forEach(src => {
                       if (!m.sources.includes(src)) m.sources.push(src);
                   });
                   if (!m.sources.includes(c.source)) m.sources.push(c.source);
                   
-                  // Vector Stitching: if they are aligned linear features, upgrade to "Systemic Corridor"
-                  if (isAligned && dist > thresholdM) {
-                      m.type = "Systemic Movement Corridor (Road/Track)";
-                      m.confidence = 'High';
+                  // Vector Stitching Upgrade
+                  if (canStitch && dist > thresholdM) {
+                      m.type = "Stitched Linear System";
+                      // Confidence decay if distance is large
+                      m.confidence = dist > 45 ? 'Medium' : 'High';
                   }
+
+                  // 1. CONSENSUS ENGINE → ADD WEIGHTING (CRITICAL)
+                  // Reliability Matrix: LiDAR (High), Hydrology (High), Sat (Med-High)
+                  const getWeight = (s: string) => {
+                      if (s.startsWith('terrain')) return 1.0;
+                      if (s === 'hydrology') return 0.9;
+                      if (s.startsWith('satellite_summer')) return 0.8;
+                      if (s.startsWith('satellite_spring')) return 0.7;
+                      return 0.5;
+                  };
 
                   if (c.source === 'terrain') m.center = [c.center[0], c.center[1]];
                   else m.center = [(m.center[0] + c.center[0]) / 2, (m.center[1] + c.center[1]) / 2];
-                  m.findPotential = Math.min(96, m.findPotential + (c.findPotential * 0.4));
                   
-                  // Prioritize Palaeochannel type if hydrology is present in consensus
+                  // Weighted Potential Update
+                  m.findPotential = Math.min(96, m.findPotential + (c.findPotential * 0.4 * getWeight(c.source)));
+                  
                   if (c.source === 'hydrology') {
                       m.type = "Palaeochannel / Ancient Waterway";
                   }
 
-                  // Temporal Difference: Summer Stress vs Spring Baseline
                   if (m.sources.includes('satellite_summer') && !m.sources.includes('satellite_spring')) {
                       m.type = "Temporal Cropmark (Drought Stress)";
-                      m.findPotential = Math.min(96, m.findPotential + 20);
+                      m.findPotential = Math.min(96, m.findPotential + 15);
                   }
 
                   if (m.sources.length >= 3) m.confidence = 'High';
                   else if (m.sources.length >= 2 && m.confidence === 'Subtle') m.confidence = 'Medium';
                   
-                  // CALCULATE PERSISTENCE SCORE: Cross-method and Cross-scale agreement
-                  let score = (m.sources.length * 15); // Base consensus
-                  if (m.sources.includes('terrain') && m.sources.includes('terrain_global')) score += 10; // DTM + MDH match
-                  if (m.sources.includes('slope')) score += 5; // LRM/Slope match
-                  if (c.scaleTier !== m.scaleTier) score += 20; // Scale stability (Micro + Structural)
+                  // CALCULATE PERSISTENCE SCORE
+                  let score = (m.sources.length * 15);
+                  if (m.sources.includes('terrain') && m.sources.includes('terrain_global')) score += 10;
+                  if (m.sources.includes('slope')) score += 5;
+                  if (c.scaleTier !== m.scaleTier) score += 20;
                   m.persistenceScore = Math.min(100, (m.persistenceScore || 0) + score);
 
                   found = true;
@@ -1077,7 +1127,6 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
               }
           }
           if (!found) {
-              // If it's summer satellite but not spring, it might be a new cropmark
               const initialType = c.source === 'satellite_summer' ? "Temporal Cropmark (Potential)" : c.type;
               merged.push({ ...c, type: initialType, sources: [c.source], persistenceScore: 25, rescanCount: 1 });
           }
@@ -1162,10 +1211,14 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
   const generateHotspots = (clusters: Cluster[], pas: PASFind[], monuments: [number, number][], period: string = 'All', perms: any[] = [], flds: any[] = []): Hotspot[] => {
        const results: Hotspot[] = [];
        const usedIds = new Set<string>();
-       const radiusM = 50;
 
        for (const c of clusters) {
            if (usedIds.has(c.id)) continue;
+
+           // 2. CLUSTERING RADIUS → MAKE DYNAMIC
+           let radiusM = 40; // Default
+           if (c.type.includes('Roundhouse') || c.type.includes('Barrow')) radiusM = 20; // Micro features
+           else if (c.metrics && c.metrics.ratio > 4) radiusM = 80; // Landscape features (routes/ditches)
 
            // 1. CLUSTER OVERLAPPING HITS
            const members = clusters.filter(n => !usedIds.has(n.id) && getDistance(c.center, n.center) < radiusM);
@@ -1180,224 +1233,71 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
            let penalty = 0;
            const explanation: string[] = [];
 
-           // A. ANOMALY SCORE (0-40)
+           // A. ANOMALY SCORE (0-40) - WEIGHTED
            const sources = new Set(members.flatMap(m => m.sources));
            const hasLidar = sources.has('terrain') || sources.has('terrain_global');
            const hasSatellite = sources.has('satellite_spring') || sources.has('satellite_summer');
            const hasHydrology = sources.has('hydrology');
-           const hasHistoric = sources.has('historic');
 
            if (hasLidar) {
                const bestLidar = members.find(m => m.sources.includes('terrain') || m.sources.includes('terrain_global'));
-               let lidarScore = 0;
-               if (bestLidar?.confidence === 'High') lidarScore = 15;
-               else if (bestLidar?.confidence === 'Medium') lidarScore = 8;
-               else lidarScore = 4;
-
-               // Roman Multiplier for Linear (Roads)
-               if (period === 'Roman' && bestLidar?.metrics && bestLidar.metrics.ratio > 3) {
-                   lidarScore = Math.round(lidarScore * 1.3);
-                   explanation.push("Roman-aligned linear relief");
-               } else if (lidarScore >= 15) {
-                   explanation.push("Structured LiDAR relief anomaly");
-               } else if (lidarScore >= 8) {
-                   explanation.push("Clear terrain anomaly");
-               } else {
-                   explanation.push("Weak relief signature");
-               }
+               let lidarScore = bestLidar?.confidence === 'High' ? 18 : (bestLidar?.confidence === 'Medium' ? 10 : 5);
                anomaly += lidarScore;
+               explanation.push("Reliable LiDAR relief signature");
            }
 
            if (hasSatellite) {
                const hasSummer = sources.has('satellite_summer');
                const hasSpring = sources.has('satellite_spring');
-               let satScore = 0;
-               if (hasSummer && hasSpring) { 
-                   satScore = 17; // Increased from 10 (+7 Repeatability boost)
-                   explanation.push("Multi-temporal cropmark (Verified)"); 
-               }
-               else if (hasSummer) { satScore = 6; explanation.push("Visible vegetation stress"); }
-               else { satScore = 3; explanation.push("Faint aerial anomaly"); }
+               let satScore = (hasSummer && hasSpring) ? 15 : (hasSummer ? 7 : 3);
                anomaly += satScore;
-           }
-
-           if (hasHydrology) {
-               const bestHydro = members.find(m => m.sources.includes('hydrology'));
-               let hydroScore = (bestHydro && bestHydro.metrics && bestHydro.metrics.ratio > 5) ? 10 : 5;
-
-               // Bronze Age Hydrology Weighting
-               if (period === 'Bronze Age') {
-                   hydroScore = Math.round(hydroScore * 1.2);
-                   explanation.push("Bronze Age water association");
-               } else {
-                   explanation.push(hydroScore >= 10 ? "Major water interaction point" : "Historic water feature");
-               }
-               anomaly += hydroScore;
-           }
-
-           if (hasHistoric) { 
-               let histScore = 5;
-               if (period === 'Roman') histScore = 8; // PAS Roman density weight
-               anomaly += histScore;
-               explanation.push("Matches historic record"); 
+               explanation.push(hasSummer && hasSpring ? "Verified multi-temporal cropmark" : "Spectral vegetation anomaly");
            }
 
            // B. CONTEXT SCORE (0-20)
            const center = c.center;
            const isRaised = members.some(m => m.polarity === 'Raised');
+           if (isRaised) { context += 8; explanation.push("Raised dry footing"); }
 
-           if (isRaised) { 
-               let raisedScore = 8;
-               if (period === 'Bronze Age') raisedScore = 11; // Elevated ground preference
-               context += raisedScore; 
-               explanation.push("Raised dry footing"); 
-           }
-
-           // Topographical Preference Logic (Phase 2)
-           const hasAspect = members.some(m => m.aspect !== undefined);
-           const hasElevation = members.some(m => m.relativeElevation !== undefined);
-
-           if (hasAspect) {
-               // South-facing preference (135 - 225 degrees)
-               const isSouthFacing = members.some(m => m.aspect && m.aspect > 135 && m.aspect < 225);
-               if (isSouthFacing) {
-                   context += 4;
-                   explanation.push("Favourable south-facing aspect");
+           // C. HYDROLOGY → EXTEND INTO BEHAVIOUR LAYER
+           if (hasHydrology) {
+               anomaly += 7;
+               // Behavioural Hydrology
+               if (isRaised) { 
+                   behaviour += 8; 
+                   explanation.push("Island effect: Dry ground in wet zone"); 
+               }
+               if (members.some(m => m.type.includes('Corridor'))) {
+                   behaviour += 7;
+                   explanation.push("Historic river crossing / Ford potential");
                }
            }
 
-           if (hasElevation) {
-               const isSheltered = members.some(m => m.relativeElevation === 'Hollow');
-               const isExposed = members.some(m => m.relativeElevation === 'Ridge');
-
-               if (isSheltered) {
-                   context += 4;
-                   explanation.push("Sheltered topographical hollow");
-               } else if (isExposed) {
-                   penalty -= 4; // Section 10 Penalty
-                   explanation.push("Exposed ridge-line (high exposure)");
-               }
-           }
-
-           // Boundary Context (Phase 3)
-           let isNearBoundary = false;
-           let isBoundaryCorner = false;
-           const allBoundaries = [...perms.map(p => p.boundary), ...flds.map(f => f.boundary)].filter(b => b && b.coordinates);
-
-           for (const b of allBoundaries) {
-               const coords = b.coordinates[0]; // Polygon outer ring
-               for (let i = 0; i < coords.length; i++) {
-                   const p1 = coords[i];
-                   const dist = getDistance(center, [p1[0], p1[1]]);
-                   if (dist < 15) {
-                       isNearBoundary = true;
-                       // Check for corner (angle change between segments)
-                       const pPrev = coords[i === 0 ? coords.length - 2 : i - 1];
-                       const pNext = coords[i === coords.length - 1 ? 1 : i + 1];
-                       const angle1 = Math.atan2(p1[1] - pPrev[1], p1[0] - pPrev[0]);
-                       const angle2 = Math.atan2(pNext[1] - p1[1], pNext[0] - p1[0]);
-                       const angleDiff = Math.abs(angle2 - angle1);
-                       if (angleDiff > 0.4 && angleDiff < 2.7) { // roughly 25 to 155 degrees
-                           isBoundaryCorner = true;
-                       }
-                       break;
-                   }
-               }
-               if (isNearBoundary) break;
-           }
-
-           if (isBoundaryCorner) { context += 6; explanation.push("Strategic boundary corner"); }
-           else if (isNearBoundary) { context += 4; explanation.push("Historic boundary activity zone"); }
-
-           const nearbyPAS = pas.filter(f => getDistance(center, [f.lon, f.lat]) < 500);
-           const nearbyMonuments = monuments.filter(m => getDistance(center, m) < 500);
-
-           if (nearbyPAS.length > 3 || nearbyMonuments.length > 0) { 
-               let proxScore = 6;
-               if (period === 'Roman' || period === 'Medieval') proxScore = 9; // High-density era weighting
-               context += proxScore; 
-               explanation.push("Proximity to historic records"); 
-           }
-           if (hasHydrology && isRaised) { context += 6; explanation.push("Wet/Dry transition edge"); }
-
-           // C. CONVERGENCE BONUS (0-20)
-           const sourceCount = sources.size;
-           const convergenceMap = [0, 0, 6, 12, 18, 20];
-           convergence = convergenceMap[Math.min(sourceCount, 5)];
-
-           if (hasLidar && hasSatellite) convergence += 3;
-           if (hasLidar && hasHydrology) convergence += 4;
-           if (hasHydrology && isRaised) convergence += 4;
-           if (hasLidar && nearbyPAS.length > 0) convergence += 4;
-
-           // Multi-year Satellite Boost
-           if (sources.has('satellite_spring') && sources.has('satellite_summer')) convergence += 5;
-
-           convergence = Math.min(20, convergence);
-           if (convergence >= 12) explanation.push("High multi-source consensus");
-
-           // D. BEHAVIOUR BONUS (0-15)
-           const isCorridor = members.some(m => m.type.includes('Corridor') || m.type.includes('Trackway'));
-           const isEnclosure = members.some(m => m.type.includes('Enclosure') || m.type.includes('Henge'));
-
-           if (hasHydrology) { behaviour += 5; explanation.push("Strategic water access point"); }
-           if (isCorridor) { behaviour += 5; explanation.push("Movement corridor / Pinch point"); }
-
-           // Access Point Detection (Phase 3)
-           if (isCorridor && isNearBoundary) {
-               behaviour += 5;
-               explanation.push("Probable historic access point (Gate/Stile)");
-           }
-
-           if (isEnclosure || members.length > 3) { 
-               let actScore = 5;
-               if (period === 'Medieval') actScore = 8; // Medieval field system/settlement density
-               behaviour += actScore; 
-               explanation.push("High-use activity area"); 
-           }
-
-           // Human Pause Point Logic (Phase 3 - Combinator)
-           const isPausePoint = (hasHydrology && isRaised && isCorridor) || (isBoundaryCorner && isCorridor) || (isBoundaryCorner && hasHydrology && isRaised);
-           if (isPausePoint) {
-               behaviour += 6;
-               explanation.push("High-intensity Human Pause Point");
-           }
-
-           // E. FALSE POSITIVE PENALTY (0 to -25)
+           // D. FALSE POSITIVE PENALTY & NEGATIVE EXPLANATIONS
            members.forEach(m => {
-               if (m.disturbanceRisk === 'High') penalty -= 15;
-               else if (m.disturbanceRisk === 'Medium') penalty -= 8;
-
-               // Negative Signal: Featureless Flat Ground
+               if (m.disturbanceRisk === 'High') {
+                   penalty -= 20;
+                   explanation.push("IGNORE: High risk of modern disturbance");
+               }
                if (m.metrics && m.metrics.density < 0.05) {
-                   penalty -= 5;
-                   explanation.push("Flat/Featureless Terrain");
+                   penalty -= 10;
+                   explanation.push("IGNORE: Uniform/Featureless terrain");
                }
            });
-           if (sourceCount === 1 && members[0].confidence === 'Subtle') penalty -= 6;
-
-           penalty = Math.max(-25, penalty);
-           if (penalty < -10) explanation.push("Risk of modern disturbance");
 
            // FINAL CALCULATION
            const score = Math.min(98, Math.max(0, anomaly + context + convergence + behaviour + penalty));
 
            let confidence: Hotspot['confidence'] = 'Weak';
-           if (convergence >= 18) confidence = 'Elite';
-           else if (convergence >= 12) confidence = 'Strong';
-           else if (convergence >= 6) confidence = 'Moderate';
+           if (score > 85) confidence = 'Elite';
+           else if (score > 65) confidence = 'Strong';
+           else if (score > 40) confidence = 'Moderate';
 
            let type: Hotspot['type'] = 'Field Activity Zone';
-           if (isPausePoint) type = 'Raised Dry Point'; // Defaulting to something descriptive
            if (hasHydrology && isRaised) type = 'Raised Dry Point';
-           else if (hasHydrology) type = 'Water Interaction';
-           else if (isCorridor && isNearBoundary) type = 'Movement Corridor';
-           else if (isCorridor) type = 'Movement Corridor';
-           else if (members.some(m => m.contextLabel?.includes('Settlement'))) type = 'Settlement Edge';
+           else if (members.some(m => m.type.includes('Corridor'))) type = 'Movement Corridor';
 
-           if (isPausePoint && score > 70) type = 'Settlement Edge'; // Upgrade to settlement if very high score
-
-          // Bounding Box
+          // Bounding Box calculation
           let minLon = members[0].center[0], maxLon = members[0].center[0];
           let minLat = members[0].center[1], maxLat = members[0].center[1];
           members.forEach(m => {
@@ -1975,13 +1875,45 @@ setHotspots(tacticalHotspots);
 
                         {/* Analysis Grid */}
                         <div className="grid grid-cols-2 gap-3">
-                            <div className="bg-white/5 p-4 rounded-3xl border border-white/10">
-                                <span className="block text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Evidence</span>
-                                <span className="text-lg font-black text-blue-400">{pasFinds.length} <span className="text-[10px] text-blue-400/50 italic">Records</span></span>
+                            <div className="bg-white/5 p-4 rounded-3xl border border-white/10 relative">
+                                {scanConfidence && (
+                                    <span className={`absolute top-2 right-2 text-[6px] font-black px-1 rounded border ${
+                                        scanConfidence === 'High' ? 'text-emerald-400 border-emerald-400/30' :
+                                        scanConfidence === 'Medium' ? 'text-amber-400 border-amber-400/30' :
+                                        'text-red-400 border-red-400/30'
+                                    }`}>
+                                        {scanConfidence}
+                                    </span>
+                                )}
+                                <span className="block text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Terrain Relief</span>
+                                <div className="h-1 bg-slate-800 rounded-full overflow-hidden my-1.5">
+                                    <div className="h-full bg-emerald-500" style={{ width: `${potentialScore?.breakdown?.terrain || 0}%` }} />
+                                </div>
+                                <span className="text-lg font-black text-emerald-500">{potentialScore?.breakdown?.terrain || '0'}<span className="text-[10px] text-emerald-500/50 italic">%</span></span>
                             </div>
+                            
                             <div className="bg-white/5 p-4 rounded-3xl border border-white/10">
-                                <span className="block text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Place Names</span>
-                                <span className="text-lg font-black text-emerald-500">{placeSignals.length} <span className="text-[10px] text-emerald-500/50 italic">Signals</span></span>
+                                <span className="block text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Hydro Context</span>
+                                <div className="h-1 bg-slate-800 rounded-full overflow-hidden my-1.5">
+                                    <div className="h-full bg-blue-500" style={{ width: `${potentialScore?.breakdown?.hydro || 0}%` }} />
+                                </div>
+                                <span className="text-lg font-black text-blue-500">{potentialScore?.breakdown?.hydro || '0'}<span className="text-[10px] text-blue-500/50 italic">%</span></span>
+                            </div>
+
+                            <div className="bg-white/5 p-4 rounded-3xl border border-white/10">
+                                <span className="block text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Historic Density</span>
+                                <div className="h-1 bg-slate-800 rounded-full overflow-hidden my-1.5">
+                                    <div className="h-full bg-amber-500" style={{ width: `${potentialScore?.breakdown?.historic || 0}%` }} />
+                                </div>
+                                <span className="text-lg font-black text-amber-500">{potentialScore?.breakdown?.historic || '0'}<span className="text-[10px] text-amber-500/50 italic">%</span></span>
+                            </div>
+
+                            <div className="bg-white/5 p-4 rounded-3xl border border-white/10">
+                                <span className="block text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Spectral Signals</span>
+                                <div className="h-1 bg-slate-800 rounded-full overflow-hidden my-1.5">
+                                    <div className="h-full bg-purple-500" style={{ width: `${potentialScore?.breakdown?.signals || 0}%` }} />
+                                </div>
+                                <span className="text-lg font-black text-purple-500">{potentialScore?.breakdown?.signals || '0'}<span className="text-[10px] text-purple-500/50 italic">%</span></span>
                             </div>
                         </div>
 
