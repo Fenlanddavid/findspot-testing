@@ -168,6 +168,7 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isIntelOpen, setIsIntelOpen] = useState(false);
   const [targetPeriod, setTargetPeriod] = useState<'All' | 'Bronze Age' | 'Roman' | 'Medieval'>('All');
+  const [isLocating, setIsLocating] = useState(false);
   
   const permissions = useLiveQuery(() => db.permissions.where("projectId").equals(projectId).toArray()) || [];
   const fields = useLiveQuery(() => db.fields.where("projectId").equals(projectId).toArray()) || [];
@@ -701,9 +702,19 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
   }, [systemLog]);
 
   const findMe = () => {
-    navigator.geolocation.getCurrentPosition((pos) => {
+    if (isLocating) return;
+    setIsLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setIsLocating(false);
         mapRef.current?.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 16 });
-    });
+      },
+      (err) => {
+        setIsLocating(false);
+        console.error("GPS Error:", err);
+      },
+      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+    );
   };
 
   const searchLocation = async (e: React.FormEvent) => {
@@ -1557,17 +1568,13 @@ setHotspots(tacticalHotspots);
                           <span className="text-[7px] font-black text-emerald-500/80 uppercase tracking-[0.2em] whitespace-nowrap bg-slate-900/80 px-1.5 py-0.5 rounded border border-emerald-500/20">Terrain Scan</span>
                       </div>
                   )}
-                  <select 
-                    value={targetPeriod} 
-                    onChange={(e) => setTargetPeriod(e.target.value as any)}
-                    className="bg-slate-800 text-white border border-white/10 px-2 py-1.5 rounded-lg text-[9px] font-black tracking-widest uppercase outline-none focus:ring-1 focus:ring-emerald-500 appearance-none text-center min-w-[80px]"
+                  <button 
+                    onClick={findMe} 
+                    disabled={isLocating}
+                    className="bg-slate-800 text-white px-4 py-1.5 rounded-lg text-[9px] font-black tracking-widest uppercase hover:bg-slate-700 transition-colors disabled:opacity-50"
                   >
-                    <option value="All">All Periods</option>
-                    <option value="Bronze Age">Bronze Age</option>
-                    <option value="Roman">Roman</option>
-                    <option value="Medieval">Medieval</option>
-                  </select>
-                  <button onClick={findMe} className="bg-slate-800 text-white px-3 py-1.5 rounded-lg text-[9px] font-black tracking-widest uppercase hover:bg-slate-700 transition-colors">GPS</button>
+                    {isLocating ? '...' : 'GPS'}
+                  </button>
                   <button 
                     onClick={executeScan} 
                     disabled={analyzing} 
