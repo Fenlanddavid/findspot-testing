@@ -1767,8 +1767,9 @@ if (tacticalHotspots.length > 0) {
     // Wait slightly for map markers to settle, then suggest
     setTimeout(() => {
         setShowStartHere(true);
-        // Subtle approach: No automatic camera movement
-    }, 2000);
+        // Gentle zoom-in (not jarring)
+        mapRef.current?.fitBounds(best.bounds as any, { padding: 100, duration: 2500 });
+    }, 1500);
 }
 
 // Auto-load PAS for the new scan area
@@ -1860,51 +1861,49 @@ setAnalyzing(false);
         <div className="flex-1 relative bg-slate-900">
             <div ref={mapContainerRef} className="absolute inset-0" />
 
-            {/* "START HERE" SYSTEM OVERLAY - SUBTLE PILL */}
+            {/* "START HERE" SYSTEM OVERLAY */}
             {showStartHere && startHereId && hotspots.find(h => h.id === startHereId) && (
-                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[70] animate-in fade-in slide-in-from-bottom-4 duration-1000">
-                    <div className="bg-slate-900/95 backdrop-blur-xl border border-amber-500/30 rounded-full pl-4 pr-1.5 py-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.5),0_0_15px_rgba(245,158,11,0.1)] flex items-center gap-3">
-                        <div className="flex items-center gap-2">
-                            <span className="w-2 h-2 bg-amber-500 rounded-full animate-ping" />
-                            <p className="text-[10px] font-black text-amber-500 uppercase tracking-[0.2em] whitespace-nowrap">Suggested Hotspot</p>
-                        </div>
+                <div className="absolute bottom-24 left-4 right-4 sm:left-auto sm:right-4 sm:w-80 z-[70] animate-in fade-in slide-in-from-bottom-4 duration-700">
+                    <div className="bg-slate-900/95 backdrop-blur-xl border-2 border-amber-500/50 rounded-2xl p-4 shadow-[0_20px_50px_rgba(0,0,0,0.5),0_0_20px_rgba(245,158,11,0.2)] relative overflow-hidden">
+                        {/* Subtle background glow */}
+                        <div className="absolute -top-10 -right-10 w-32 h-32 bg-amber-500/10 rounded-full blur-3xl" />
                         
-                        <div className="h-4 w-[1px] bg-white/10" />
-
-                        <div className="flex items-center gap-1.5">
+                        <div className="relative">
+                            <p className="text-[10px] font-black text-amber-500 uppercase tracking-[0.2em] mb-1">FindSpot Suggestion</p>
+                            <h3 className="text-xl font-black text-white uppercase tracking-tighter leading-tight mb-1">Start Here</h3>
+                            
                             {hotspots.filter(h => h.id === startHereId).map(h => (
-                                <div key={h.id} className="flex items-center gap-2">
-                                    <button 
-                                        onClick={() => {
-                                            setSelectedHotspotId(h.id);
-                                            mapRef.current?.fitBounds(h.bounds as any, { padding: 40 });
-                                        }}
-                                        className="text-white text-[10px] font-bold hover:text-amber-400 transition-colors whitespace-nowrap"
-                                    >
-                                        View Target ({h.score}%)
-                                    </button>
-                                    <button 
-                                        onClick={() => {
-                                            const params = new URLSearchParams();
-                                            params.set("lat", h.center[1].toString());
-                                            params.set("lon", h.center[0].toString());
-                                            navigate(`/find?${params.toString()}`);
-                                        }}
-                                        className="bg-amber-500 hover:bg-amber-400 text-slate-950 text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-wider transition-all active:scale-95 shadow-lg shadow-amber-500/20"
-                                    >
-                                        Begin
-                                    </button>
+                                <div key={h.id}>
+                                    <p className="text-slate-300 text-sm font-medium leading-snug mb-4">
+                                        {getStartHereExplanation(h)}
+                                    </p>
+                                    
+                                    <div className="flex flex-col gap-2">
+                                        <button 
+                                            onClick={() => {
+                                                const params = new URLSearchParams();
+                                                params.set("lat", h.center[1].toString());
+                                                params.set("lon", h.center[0].toString());
+                                                navigate(`/find?${params.toString()}`);
+                                            }}
+                                            className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg shadow-amber-500/20"
+                                        >
+                                            Begin session here 
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                                                <polyline points="12 5 19 12 12 19"></polyline>
+                                            </svg>
+                                        </button>
+                                        
+                                        <button 
+                                            onClick={() => setShowStartHere(false)}
+                                            className="w-full py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest hover:text-slate-300 transition-colors"
+                                        >
+                                            Explore map instead
+                                        </button>
+                                    </div>
                                 </div>
                             ))}
-                            <button 
-                                onClick={() => setShowStartHere(false)}
-                                className="p-1 text-slate-500 hover:text-white transition-colors ml-1"
-                            >
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                                    <line x1="6" y1="6" x2="18" y2="18"></line>
-                                </svg>
-                            </button>
                         </div>
                     </div>
                 </div>
@@ -1964,24 +1963,20 @@ setAnalyzing(false);
                     </div>
                     <div className="flex flex-col gap-2 pointer-events-auto max-h-[40vh] overflow-y-auto scrollbar-hide pb-4">
                         {hotspots.slice(0, 3).map(h => (
-                            <div key={h.id} className="relative">
-                                {h.id === startHereId && (
-                                    <div className="absolute -top-1 left-1/2 -translate-x-1/2 bg-amber-500 text-slate-950 text-[6px] font-black px-1 rounded-full uppercase tracking-tighter z-10 shadow-sm">START</div>
-                                )}
-                                <button
-                                    onClick={() => {
-                                        setSelectedHotspotId(h.id === selectedHotspotId ? null : h.id);
-                                        if (h.id !== selectedHotspotId) mapRef.current?.fitBounds(h.bounds as any, { padding: 40 });
-                                    }}
-                                    className={`w-14 h-10 flex items-center justify-center rounded-xl border shadow-xl backdrop-blur-md transition-all active:scale-95 flex-shrink-0 ${
-                                        selectedHotspotId === h.id
-                                        ? 'bg-emerald-500 border-white text-white shadow-[0_0_20px_rgba(16,185,129,0.5)]'
-                                        : 'bg-slate-900/90 border-white/10 text-slate-300'
-                                    }`}
-                                >
-                                    <span className="text-[12px] font-black tracking-tight">{h.score}%</span>
-                                </button>
-                            </div>
+                            <button
+                                key={h.id}
+                                onClick={() => {
+                                    setSelectedHotspotId(h.id === selectedHotspotId ? null : h.id);
+                                    if (h.id !== selectedHotspotId) mapRef.current?.fitBounds(h.bounds as any, { padding: 40 });
+                                }}
+                                className={`w-14 h-10 flex items-center justify-center rounded-xl border shadow-xl backdrop-blur-md transition-all active:scale-95 flex-shrink-0 ${
+                                    selectedHotspotId === h.id
+                                    ? 'bg-emerald-500 border-white text-white shadow-[0_0_20px_rgba(16,185,129,0.5)]'
+                                    : 'bg-slate-900/90 border-white/10 text-slate-300'
+                                }`}
+                            >
+                                <span className="text-[12px] font-black tracking-tight">{h.score}%</span>
+                            </button>
                         ))}
                     </div>
                 </div>
@@ -2470,12 +2465,7 @@ setAnalyzing(false);
                         >
                             <div className="flex justify-between items-start mb-3">
                                 <div>
-                                    <div className="flex items-center gap-2 mb-0.5">
-                                        <h3 className={`text-xs font-black uppercase tracking-tight ${selectedHotspotId === h.id ? 'text-white' : 'text-slate-200'}`}>{h.type}</h3>
-                                        {h.id === startHereId && (
-                                            <span className="bg-amber-500 text-slate-950 text-[7px] font-black px-1 rounded uppercase tracking-[0.1em]">Start</span>
-                                        )}
-                                    </div>
+                                    <h3 className={`text-xs font-black uppercase tracking-tight ${selectedHotspotId === h.id ? 'text-white' : 'text-slate-200'}`}>{h.type}</h3>
                                     <span className="text-[10px] font-black text-emerald-500 uppercase tracking-[0.1em]">{h.score}% Probability</span>
                                 </div>
                                 <div className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest ${
