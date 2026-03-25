@@ -202,7 +202,7 @@ export class FindSpotDB extends Dexie {
   settings!: Table<Setting, string>;
 
   constructor() {
-    super("findspot_uk");
+    super("findspot_uk_test");
 
     this.version(1).stores({
       projects: "id, name, region, createdAt",

@@ -184,6 +184,15 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
   const [isIntelOpen, setIsIntelOpen] = useState(false);
   const [targetPeriod, setTargetPeriod] = useState<'All' | 'Bronze Age' | 'Roman' | 'Medieval'>('All');
   const [isLocating, setIsLocating] = useState(false);
+  const [startHereId, setStartHereId] = useState<string | null>(null);
+  const [showStartHere, setShowStartHere] = useState(false);
+
+  const getStartHereExplanation = (hotspot: Hotspot) => {
+    if (hotspot.metrics.behaviour > 15 && (hotspot.explanation.some(e => e.includes('route') || e.includes('crossing')) || hotspot.type === 'Movement Corridor')) return "Likely movement route";
+    if (hotspot.type === 'Raised Dry Point' || (hotspot.metrics.anomaly > 20 && hotspot.explanation.some(e => e.includes('water') || e.includes('Hydro')))) return "Raised ground near water";
+    if (hotspot.type === 'Settlement Edge' || hotspot.explanation.some(e => e.includes('Settlement'))) return "Edge of activity zone";
+    return "Good starting point";
+  };
   
   const permissions = useLiveQuery(() => db.permissions.where("projectId").equals(projectId).toArray()) || [];
   const fields = useLiveQuery(() => db.fields.where("projectId").equals(projectId).toArray()) || [];
@@ -220,6 +229,8 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
     setDetectedFeatures([]);
     setHotspots([]); // Clear all strategic hotspots
     setSelectedHotspotId(null); // Clear active hotspot border
+    setStartHereId(null);
+    setShowStartHere(false);
     setHeritageCount(0);
     setSelectedId(null);
     if (mapRef.current) {
@@ -485,6 +496,20 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
         map.addLayer({ id: 'monuments-outline', type: 'line', source: 'monuments', paint: { 'line-color': '#ef4444', 'line-width': 3 } });
         
         map.addSource('hotspots-overlay', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+        
+        // --- START HERE GLOW LAYER ---
+        map.addLayer({
+            id: 'hotspots-start-here-glow',
+            type: 'line',
+            source: 'hotspots-overlay',
+            paint: {
+                'line-color': '#f59e0b',
+                'line-width': 12,
+                'line-blur': 10,
+                'line-opacity': 0.6
+            }
+        });
+
         map.addLayer({ 
             id: 'hotspots-outline', 
             type: 'line', 
@@ -596,7 +621,7 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
         const hotspotGeoJSON = {
             type: 'FeatureCollection',
             features: hotspots
-                .filter(h => h.id === selectedHotspotId) // Only include the selected hotspot
+                .filter(h => h.id === selectedHotspotId || h.id === startHereId)
                 .map(h => ({
                 type: 'Feature',
                 geometry: {
@@ -609,23 +634,56 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
                         [h.bounds[0][0], h.bounds[0][1]]
                     ]]
                 },
-                properties: { id: h.id, type: h.type, score: h.score }
+                properties: { id: h.id, type: h.type, score: h.score, isStartHere: h.id === startHereId }
             }))
         };
         const source = mapRef.current.getSource('hotspots-overlay') as maplibregl.GeoJSONSource;
         if (source) source.setData(hotspotGeoJSON as any);
     }
-  }, [hotspots, selectedHotspotId]);
+  }, [hotspots, selectedHotspotId, startHereId]);
 
   useEffect(() => {
-    if (mapRef.current && mapRef.current.getLayer('hotspots-outline')) {
-        if (selectedHotspotId) {
-            mapRef.current.setFilter('hotspots-outline', ['==', ['get', 'id'], selectedHotspotId]);
-        } else {
-            mapRef.current.setFilter('hotspots-outline', ['==', ['get', 'id'], '']);
+    if (mapRef.current) {
+        if (mapRef.current.getLayer('hotspots-outline')) {
+            if (selectedHotspotId) {
+                mapRef.current.setFilter('hotspots-outline', ['==', ['get', 'id'], selectedHotspotId]);
+                mapRef.current.setFilter('hotspots-fill', ['==', ['get', 'id'], selectedHotspotId]);
+            } else {
+                mapRef.current.setFilter('hotspots-outline', ['==', ['get', 'id'], '']);
+                mapRef.current.setFilter('hotspots-fill', ['==', ['get', 'id'], '']);
+            }
+        }
+        
+        if (mapRef.current.getLayer('hotspots-start-here-glow')) {
+            if (showStartHere && startHereId) {
+                mapRef.current.setFilter('hotspots-start-here-glow', ['==', ['get', 'id'], startHereId]);
+                mapRef.current.setLayoutProperty('hotspots-start-here-glow', 'visibility', 'visible');
+            } else {
+                mapRef.current.setLayoutProperty('hotspots-start-here-glow', 'visibility', 'none');
+            }
         }
     }
-  }, [selectedHotspotId]);
+  }, [selectedHotspotId, startHereId, showStartHere]);
+
+  // Pulsing animation for the glow layer
+  useEffect(() => {
+    let opacity = 0.6;
+    let direction = -0.01;
+    let interval: any;
+
+    if (showStartHere && startHereId && mapRef.current) {
+        interval = setInterval(() => {
+            if (!mapRef.current) return;
+            if (mapRef.current.getLayer('hotspots-start-here-glow')) {
+                opacity += direction;
+                if (opacity <= 0.2 || opacity >= 0.7) direction *= -1;
+                mapRef.current.setPaintProperty('hotspots-start-here-glow', 'line-opacity', opacity);
+            }
+        }, 50);
+    }
+
+    return () => { if (interval) clearInterval(interval); };
+  }, [showStartHere, startHereId]);
 
   useEffect(() => {
     if (mapRef.current) {
@@ -1699,17 +1757,30 @@ const tacticalHotspots = generateHotspots(contextualized, pasFinds, monumentPoin
 setDetectedFeatures(contextualized);
 setHotspots(tacticalHotspots);
 
+// --- "START HERE" SYSTEM ---
+if (tacticalHotspots.length > 0) {
+    // Select highest scoring hotspot as the suggested starting point
+    const best = tacticalHotspots[0];
+    setStartHereId(best.id);
+
+    // 10-20 second "Aha!" moment goal:
+    // Wait slightly for map markers to settle, then suggest
+    setTimeout(() => {
+        setShowStartHere(true);
+        // Subtle approach: No automatic camera movement
+    }, 2000);
+}
+
 // Auto-load PAS for the new scan area
-        // loadPASFinds(); // REMOVED: Only trigger when manually pressed
+// loadPASFinds(); // REMOVED: Only trigger when manually pressed
 
-        setAnalyzing(false);
+setAnalyzing(false);
 
-        addLog(`Scan Complete. ${tacticalHotspots.length} Hotspots identified.`);
-    } catch (e) { addLog("Engine Error."); console.error(e); }
-    
-    setAnalyzing(false);
-  };
+addLog(`Scan Complete. ${tacticalHotspots.length} Hotspots identified.`);
+} catch (e) { addLog("Engine Error."); console.error(e); }
 
+setAnalyzing(false);
+};
   return (
     <div className="flex flex-col h-[calc(100vh-140px)] landscape:h-[calc(100vh-100px)] sm:h-[calc(100vh-220px)] bg-slate-950 rounded-3xl overflow-hidden border border-slate-800 shadow-2xl relative">
       <header className="bg-slate-900/80 border-b border-white/5 shrink-0 z-50 backdrop-blur-md">
@@ -1788,6 +1859,56 @@ setHotspots(tacticalHotspots);
       <div className="flex flex-1 overflow-hidden relative">
         <div className="flex-1 relative bg-slate-900">
             <div ref={mapContainerRef} className="absolute inset-0" />
+
+            {/* "START HERE" SYSTEM OVERLAY - SUBTLE PILL */}
+            {showStartHere && startHereId && hotspots.find(h => h.id === startHereId) && (
+                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[70] animate-in fade-in slide-in-from-bottom-4 duration-1000">
+                    <div className="bg-slate-900/95 backdrop-blur-xl border border-amber-500/30 rounded-full pl-4 pr-1.5 py-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.5),0_0_15px_rgba(245,158,11,0.1)] flex items-center gap-3">
+                        <div className="flex items-center gap-2">
+                            <span className="w-2 h-2 bg-amber-500 rounded-full animate-ping" />
+                            <p className="text-[10px] font-black text-amber-500 uppercase tracking-[0.2em] whitespace-nowrap">Suggested Hotspot</p>
+                        </div>
+                        
+                        <div className="h-4 w-[1px] bg-white/10" />
+
+                        <div className="flex items-center gap-1.5">
+                            {hotspots.filter(h => h.id === startHereId).map(h => (
+                                <div key={h.id} className="flex items-center gap-2">
+                                    <button 
+                                        onClick={() => {
+                                            setSelectedHotspotId(h.id);
+                                            mapRef.current?.fitBounds(h.bounds as any, { padding: 40 });
+                                        }}
+                                        className="text-white text-[10px] font-bold hover:text-amber-400 transition-colors whitespace-nowrap"
+                                    >
+                                        View Target ({h.score}%)
+                                    </button>
+                                    <button 
+                                        onClick={() => {
+                                            const params = new URLSearchParams();
+                                            params.set("lat", h.center[1].toString());
+                                            params.set("lon", h.center[0].toString());
+                                            navigate(`/find?${params.toString()}`);
+                                        }}
+                                        className="bg-amber-500 hover:bg-amber-400 text-slate-950 text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-wider transition-all active:scale-95 shadow-lg shadow-amber-500/20"
+                                    >
+                                        Begin
+                                    </button>
+                                </div>
+                            ))}
+                            <button 
+                                onClick={() => setShowStartHere(false)}
+                                className="p-1 text-slate-500 hover:text-white transition-colors ml-1"
+                            >
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
             
             {/* Map Layer Toggle */}
             <div className="absolute top-4 right-4 z-[60] flex flex-col gap-2">
@@ -1843,20 +1964,24 @@ setHotspots(tacticalHotspots);
                     </div>
                     <div className="flex flex-col gap-2 pointer-events-auto max-h-[40vh] overflow-y-auto scrollbar-hide pb-4">
                         {hotspots.slice(0, 3).map(h => (
-                            <button
-                                key={h.id}
-                                onClick={() => {
-                                    setSelectedHotspotId(h.id === selectedHotspotId ? null : h.id);
-                                    if (h.id !== selectedHotspotId) mapRef.current?.fitBounds(h.bounds as any, { padding: 40 });
-                                }}
-                                className={`w-14 h-10 flex items-center justify-center rounded-xl border shadow-xl backdrop-blur-md transition-all active:scale-95 flex-shrink-0 ${
-                                    selectedHotspotId === h.id
-                                    ? 'bg-emerald-500 border-white text-white shadow-[0_0_20px_rgba(16,185,129,0.5)]'
-                                    : 'bg-slate-900/90 border-white/10 text-slate-300'
-                                }`}
-                            >
-                                <span className="text-[12px] font-black tracking-tight">{h.score}%</span>
-                            </button>
+                            <div key={h.id} className="relative">
+                                {h.id === startHereId && (
+                                    <div className="absolute -top-1 left-1/2 -translate-x-1/2 bg-amber-500 text-slate-950 text-[6px] font-black px-1 rounded-full uppercase tracking-tighter z-10 shadow-sm">START</div>
+                                )}
+                                <button
+                                    onClick={() => {
+                                        setSelectedHotspotId(h.id === selectedHotspotId ? null : h.id);
+                                        if (h.id !== selectedHotspotId) mapRef.current?.fitBounds(h.bounds as any, { padding: 40 });
+                                    }}
+                                    className={`w-14 h-10 flex items-center justify-center rounded-xl border shadow-xl backdrop-blur-md transition-all active:scale-95 flex-shrink-0 ${
+                                        selectedHotspotId === h.id
+                                        ? 'bg-emerald-500 border-white text-white shadow-[0_0_20px_rgba(16,185,129,0.5)]'
+                                        : 'bg-slate-900/90 border-white/10 text-slate-300'
+                                    }`}
+                                >
+                                    <span className="text-[12px] font-black tracking-tight">{h.score}%</span>
+                                </button>
+                            </div>
                         ))}
                     </div>
                 </div>
@@ -2345,7 +2470,12 @@ setHotspots(tacticalHotspots);
                         >
                             <div className="flex justify-between items-start mb-3">
                                 <div>
-                                    <h3 className={`text-xs font-black uppercase tracking-tight ${selectedHotspotId === h.id ? 'text-white' : 'text-slate-200'}`}>{h.type}</h3>
+                                    <div className="flex items-center gap-2 mb-0.5">
+                                        <h3 className={`text-xs font-black uppercase tracking-tight ${selectedHotspotId === h.id ? 'text-white' : 'text-slate-200'}`}>{h.type}</h3>
+                                        {h.id === startHereId && (
+                                            <span className="bg-amber-500 text-slate-950 text-[7px] font-black px-1 rounded uppercase tracking-[0.1em]">Start</span>
+                                        )}
+                                    </div>
                                     <span className="text-[10px] font-black text-emerald-500 uppercase tracking-[0.1em]">{h.score}% Probability</span>
                                 </div>
                                 <div className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest ${

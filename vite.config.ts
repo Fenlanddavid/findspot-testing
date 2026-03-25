@@ -3,14 +3,14 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
-  base: '/findspot/',
+  base: '/findspot-testing/',
   plugins: [
     react(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['logo.svg'],
       manifest: {
-        name: 'FindSpot UK',
+        name: 'FindSpot Testing',
         short_name: 'FindSpot',
         description: 'Offline metal detecting find recording',
         theme_color: "#10b981",
