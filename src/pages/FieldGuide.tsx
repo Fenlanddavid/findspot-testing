@@ -184,15 +184,9 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
   const [isIntelOpen, setIsIntelOpen] = useState(false);
   const [targetPeriod, setTargetPeriod] = useState<'All' | 'Bronze Age' | 'Roman' | 'Medieval'>('All');
   const [isLocating, setIsLocating] = useState(false);
-  const [startHereId, setStartHereId] = useState<string | null>(null);
-  const [showStartHere, setShowStartHere] = useState(false);
-
-  const getStartHereExplanation = (hotspot: Hotspot) => {
-    if (hotspot.metrics.behaviour > 15 && (hotspot.explanation.some(e => e.includes('route') || e.includes('crossing')) || hotspot.type === 'Movement Corridor')) return "Likely movement route";
-    if (hotspot.type === 'Raised Dry Point' || (hotspot.metrics.anomaly > 20 && hotspot.explanation.some(e => e.includes('water') || e.includes('Hydro')))) return "Raised ground near water";
-    if (hotspot.type === 'Settlement Edge' || hotspot.explanation.some(e => e.includes('Settlement'))) return "Edge of activity zone";
-    return "Good starting point";
-  };
+  const [hasScanned, setHasScanned] = useState(false);
+  const [showSuggestion, setShowSuggestion] = useState(false);
+  const [scanStatus, setScanStatus] = useState<string>("");
   
   const permissions = useLiveQuery(() => db.permissions.where("projectId").equals(projectId).toArray()) || [];
   const fields = useLiveQuery(() => db.fields.where("projectId").equals(projectId).toArray()) || [];
@@ -229,8 +223,6 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
     setDetectedFeatures([]);
     setHotspots([]); // Clear all strategic hotspots
     setSelectedHotspotId(null); // Clear active hotspot border
-    setStartHereId(null);
-    setShowStartHere(false);
     setHeritageCount(0);
     setSelectedId(null);
     if (mapRef.current) {
@@ -261,10 +253,10 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
         const latBuffer = 0.009; // approx 1km
         const lonBuffer = 0.015; // approx 1km at UK latitudes
         
-        const west = Number(Math.min(bounds.getWest(), center.lng - lonBuffer).toFixed(4));
-        const south = Number(Math.min(bounds.getSouth(), center.lat - latBuffer).toFixed(4));
-        const east = Number(Math.max(bounds.getEast(), center.lng + lonBuffer).toFixed(4));
-        const north = Number(Math.max(bounds.getNorth(), center.lat + latBuffer).toFixed(4));
+        const west = Number(Math.min(bounds.getWest(), center.lng - lonBuffer).toFixed(6));
+        const south = Number(Math.min(bounds.getSouth(), center.lat - latBuffer).toFixed(6));
+        const east = Number(Math.max(bounds.getEast(), center.lng + lonBuffer).toFixed(6));
+        const north = Number(Math.max(bounds.getNorth(), center.lat + latBuffer).toFixed(6));
 
         // 1. REVERSE GEOCODING (Parish & County)
         try {
@@ -496,20 +488,6 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
         map.addLayer({ id: 'monuments-outline', type: 'line', source: 'monuments', paint: { 'line-color': '#ef4444', 'line-width': 3 } });
         
         map.addSource('hotspots-overlay', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-        
-        // --- START HERE GLOW LAYER ---
-        map.addLayer({
-            id: 'hotspots-start-here-glow',
-            type: 'line',
-            source: 'hotspots-overlay',
-            paint: {
-                'line-color': '#f59e0b',
-                'line-width': 12,
-                'line-blur': 10,
-                'line-opacity': 0.6
-            }
-        });
-
         map.addLayer({ 
             id: 'hotspots-outline', 
             type: 'line', 
@@ -598,6 +576,25 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
             }
         });
 
+        map.on('click', 'hotspots-fill', (e) => {
+            if (e.features?.[0]) {
+                setShowSuggestion(false);
+                setSelectedHotspotId(e.features[0].properties?.id);
+            }
+        });
+
+        map.on('click', (e) => {
+            // Only clear if no relevant layers were hit
+            const features = map.queryRenderedFeatures(e.point, { layers: ['targets-circle', 'pas-circles', 'hotspots-fill'] });
+            if (features.length > 0) return;
+
+            setShowSuggestion(false);
+            setSelectedHotspotId(null);
+            setSelectedId(null);
+        });
+        
+        map.on('dragstart', () => setShowSuggestion(false));
+        
         map.on('move', () => {
             const z = map.getZoom();
             setZoomWarning(z > 16.5);
@@ -621,7 +618,7 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
         const hotspotGeoJSON = {
             type: 'FeatureCollection',
             features: hotspots
-                .filter(h => h.id === selectedHotspotId || h.id === startHereId)
+                .filter(h => h.id === selectedHotspotId) // Only include the selected hotspot
                 .map(h => ({
                 type: 'Feature',
                 geometry: {
@@ -634,56 +631,23 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
                         [h.bounds[0][0], h.bounds[0][1]]
                     ]]
                 },
-                properties: { id: h.id, type: h.type, score: h.score, isStartHere: h.id === startHereId }
+                properties: { id: h.id, type: h.type, score: h.score }
             }))
         };
         const source = mapRef.current.getSource('hotspots-overlay') as maplibregl.GeoJSONSource;
         if (source) source.setData(hotspotGeoJSON as any);
     }
-  }, [hotspots, selectedHotspotId, startHereId]);
+  }, [hotspots, selectedHotspotId]);
 
   useEffect(() => {
-    if (mapRef.current) {
-        if (mapRef.current.getLayer('hotspots-outline')) {
-            if (selectedHotspotId) {
-                mapRef.current.setFilter('hotspots-outline', ['==', ['get', 'id'], selectedHotspotId]);
-                mapRef.current.setFilter('hotspots-fill', ['==', ['get', 'id'], selectedHotspotId]);
-            } else {
-                mapRef.current.setFilter('hotspots-outline', ['==', ['get', 'id'], '']);
-                mapRef.current.setFilter('hotspots-fill', ['==', ['get', 'id'], '']);
-            }
-        }
-        
-        if (mapRef.current.getLayer('hotspots-start-here-glow')) {
-            if (showStartHere && startHereId) {
-                mapRef.current.setFilter('hotspots-start-here-glow', ['==', ['get', 'id'], startHereId]);
-                mapRef.current.setLayoutProperty('hotspots-start-here-glow', 'visibility', 'visible');
-            } else {
-                mapRef.current.setLayoutProperty('hotspots-start-here-glow', 'visibility', 'none');
-            }
+    if (mapRef.current && mapRef.current.getLayer('hotspots-outline')) {
+        if (selectedHotspotId) {
+            mapRef.current.setFilter('hotspots-outline', ['==', ['get', 'id'], selectedHotspotId]);
+        } else {
+            mapRef.current.setFilter('hotspots-outline', ['==', ['get', 'id'], '']);
         }
     }
-  }, [selectedHotspotId, startHereId, showStartHere]);
-
-  // Pulsing animation for the glow layer
-  useEffect(() => {
-    let opacity = 0.6;
-    let direction = -0.01;
-    let interval: any;
-
-    if (showStartHere && startHereId && mapRef.current) {
-        interval = setInterval(() => {
-            if (!mapRef.current) return;
-            if (mapRef.current.getLayer('hotspots-start-here-glow')) {
-                opacity += direction;
-                if (opacity <= 0.2 || opacity >= 0.7) direction *= -1;
-                mapRef.current.setPaintProperty('hotspots-start-here-glow', 'line-opacity', opacity);
-            }
-        }, 50);
-    }
-
-    return () => { if (interval) clearInterval(interval); };
-  }, [showStartHere, startHereId]);
+  }, [selectedHotspotId]);
 
   useEffect(() => {
     if (mapRef.current) {
@@ -1582,7 +1546,7 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
           .map((h, i) => ({ ...h, number: i + 1 }));
       };
   const executeScan = async () => {
-    if (!mapRef.current) return;
+    if (!mapRef.current || analyzing) return;
     
     // PRECISION LOCK: Always scan at exactly Z16 for mathematical consistency
     const scanZoom = 16; 
@@ -1597,6 +1561,7 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
     const tY_start = Math.floor(cY) - 1;
 
     setAnalyzing(true);
+    setScanStatus("Engine Initiating...");
     setDetectedFeatures([]); // CLEAR PREVIOUS TARGETS
     setHotspots([]); // Reset hotspots for the new scan area
     setSelectedHotspotId(null); // Clear any active hotspot border
@@ -1611,52 +1576,60 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
 
     const herUrl = `https://services-eu1.arcgis.com/ZOdPfBS3aqqDYPUQ/arcgis/rest/services/National_Heritage_List_for_England_NHLE_v02_VIEW/FeatureServer/6/query?where=1%3D1&geometry=${qWest},${qSouth},${qEast},${qNorth}&geometryType=esriGeometryEnvelope&spatialRel=esriSpatialRelIntersects&inSR=4326&outSR=4326&f=geojson&outFields=Name,ListEntry`;
     
-    let assetsGeoJSON = { type: 'FeatureCollection', features: [] };
+    // START ALL ASYNC FETCHES IN PARALLEL
+    const routeQuery = `[out:json][timeout:30];(way["historic"="roman_road"](around:1000, ${center.lat}, ${center.lng});way["roman_road"="yes"](around:1000, ${center.lat}, ${center.lng});way["name"~"Roman Road",i](around:1000, ${center.lat}, ${center.lng});way["historic"="trackway"](around:1000, ${center.lat}, ${center.lng});way["holloway"="yes"](around:1000, ${center.lat}, ${center.lng});way["highway"="track"]["historic"="yes"](around:1000, ${center.lat}, ${center.lng}););out geom;`;
+    
+    const herPromise = fetch(herUrl).then(r => r.json()).catch(() => ({ features: [] }));
+    const routePromise = fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(routeQuery)}`).then(r => r.json()).catch(() => null);
+    
+    setScanStatus("Scanning Terrain...");
+    const terrainTask = scanDataSource('terrain', scanZoom, tX_start, tY_start, bounds, n, { features: [] });
+    const terrainGlobalTask = scanDataSource('terrain_global', scanZoom, tX_start, tY_start, bounds, n, { features: [] });
+    const slopeTask = scanDataSource('slope', scanZoom, tX_start, tY_start, bounds, n, { features: [] });
+    
+    setScanStatus("Scanning Hydrology...");
+    const hydroTask = scanDataSource('hydrology', scanZoom, tX_start, tY_start, bounds, n, { features: [] });
+    
+    setScanStatus("Spectral Sampling...");
+    const springTask = scanDataSource('satellite_spring', scanZoom, tX_start, tY_start, bounds, n, { features: [] });
+    const summerTask = scanDataSource('satellite_summer', scanZoom, tX_start, tY_start, bounds, n, { features: [] });
+
     try {
-        const hRes = await fetch(herUrl);
-        assetsGeoJSON = await hRes.json();
+        // Wait for all spectral bands and heritage data
+        const [
+            assetsGeoJSON,
+            terrainHits,
+            terrainGlobalHits,
+            slopeHits,
+            hydroHits,
+            springHits,
+            summerHits
+        ] = await Promise.all([
+            herPromise,
+            terrainTask,
+            terrainGlobalTask,
+            slopeTask,
+            hydroTask,
+            springTask,
+            summerTask
+        ]);
+
+        setScanStatus("Locking Coordinates...");
         setHeritageCount(assetsGeoJSON.features?.length || 0);
-        
-        // Extract center points for scoring
-        const mPoints: [number, number][] = assetsGeoJSON.features.map((f: any) => {
+        const mPoints: [number, number][] = (assetsGeoJSON.features || []).map((f: any) => {
             if (f.geometry.type === 'Point') return f.geometry.coordinates;
-            // For polygons, use the first coordinate as a rough center
             if (f.geometry.type === 'Polygon') return f.geometry.coordinates[0][0];
             if (f.geometry.type === 'MultiPolygon') return f.geometry.coordinates[0][0][0];
             return [0, 0];
         });
         setMonumentPoints(mPoints);
+        if (mapRef.current.getSource('monuments')) {
+            (mapRef.current.getSource('monuments') as maplibregl.GeoJSONSource).setData(assetsGeoJSON as any);
+        }
 
-        (mapRef.current.getSource('monuments') as maplibregl.GeoJSONSource).setData(assetsGeoJSON as any);
-    } catch (e) { addLog("HER connection error."); }
-
-    // START DEFERRED OVERPASS SCAN (Reduced 1km radius for speed)
-    const routeQuery = `[out:json][timeout:30];(way["historic"="roman_road"](around:1000, ${center.lat}, ${center.lng});way["roman_road"="yes"](around:1000, ${center.lat}, ${center.lng});way["name"~"Roman Road",i](around:1000, ${center.lat}, ${center.lng});way["historic"="trackway"](around:1000, ${center.lat}, ${center.lng});way["holloway"="yes"](around:1000, ${center.lat}, ${center.lng});way["highway"="track"]["historic"="yes"](around:1000, ${center.lat}, ${center.lng}););out geom;`;
-    const routePromise = fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(routeQuery)}`).then(r => r.json()).catch(e => null);
-
-    try {
-        addLog("Stage 1/5: Lidar DTM...");
-        const terrainHits = await scanDataSource('terrain', scanZoom, tX_start, tY_start, bounds, n, assetsGeoJSON);
-        
-        addLog("Stage 2/5: Lidar MDH...");
-        const terrainGlobalHits = await scanDataSource('terrain_global', scanZoom, tX_start, tY_start, bounds, n, assetsGeoJSON);
-
-        addLog("Stage 3/5: Slope Gradient...");
-        const slopeHits = await scanDataSource('slope', scanZoom, tX_start, tY_start, bounds, n, assetsGeoJSON);
-        
-        addLog("Stage 4/5: Hydrology (Palaeo)...");
-        const hydroHits = await scanDataSource('hydrology', scanZoom, tX_start, tY_start, bounds, n, assetsGeoJSON);
-        
-        addLog("Stage 5/6: Spring Baseline (ExG)...");
-        const springHits = await scanDataSource('satellite_spring', scanZoom, tX_start, tY_start, bounds, n, assetsGeoJSON);
-        
-        addLog("Stage 6/6: Summer Stress (ExG)...");
-        const summerHits = await scanDataSource('satellite_summer', scanZoom, tX_start, tY_start, bounds, n, assetsGeoJSON);
-        
-        addLog("Stage 7/7: Syncing Routes...");
+        setScanStatus("Syncing Routes...");
         let routes: HistoricRoute[] = [];
         try {
-            // RACE CONDITION: Wait for routePromise but timeout after 3 seconds to prevent engine hang
             const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000));
             const rData = await Promise.race([routePromise, timeoutPromise]) as any;
             
@@ -1665,8 +1638,6 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
                     const geom = el.geometry.map((g: any) => [g.lon, g.lat]);
                     const lons = geom.map((g: any) => g[0]);
                     const lats = geom.map((g: any) => g[1]);
-                    const routeBbox: [[number, number], [number, number]] = [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]];
-                    
                     return {
                         id: `route-${el.id}`,
                         type: (el.tags.historic === 'roman_road' || el.tags.roman_road === 'yes' || (el.tags.name && el.tags.name.toLowerCase().includes('roman road'))) ? 'roman_road' : 
@@ -1675,45 +1646,35 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
                         confidenceClass: 'B',
                         certaintyScore: 70,
                         geometry: geom,
-                        bbox: routeBbox,
+                        bbox: [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]],
                         period: (el.tags.historic === 'roman_road' || el.tags.roman_road === 'yes' || (el.tags.name && el.tags.name.toLowerCase().includes('roman road'))) ? 'roman' : 'unknown'
                     };
                 });
                 setHistoricRoutes(routes);
-                if (routes.length > 0) addLog(`Lock: ${routes.length} movement corridors.`);
-            } else {
-                routes = historicRoutes;
-            }
-        } catch (e) { 
-            addLog("Route sync bypassed (using cache)."); 
-            routes = historicRoutes;
-        }
+            } else { routes = historicRoutes; }
+        } catch (e) { routes = historicRoutes; }
 
+        setScanStatus("Deep Signal Audit...");
         const aimUrl = `https://services-eu1.arcgis.com/ZOdPfBS3aqqDYPUQ/arcgis/rest/services/HE_AIM_data/FeatureServer/1/query?where=1%3D1&geometry=${qWest},${qSouth},${qEast},${qNorth}&geometryType=esriGeometryEnvelope&spatialRel=esriSpatialRelIntersects&inSR=4326&outSR=4326&f=geojson&outFields=MONUMENT_TYPE,PERIOD,EVIDENCE_1`;
         let aimGeoJSON = { type: 'FeatureCollection', features: [] };
         try {
             const aRes = await fetch(aimUrl);
             aimGeoJSON = await aRes.json();
-            if (aimGeoJSON.features?.length > 0) addLog(`Lock: ${aimGeoJSON.features.length} AIM Features.`);
-        } catch (e) { addLog("AIM connection error."); }
+        } catch (e) {}
 
         const rawCombined = [...terrainHits, ...terrainGlobalHits, ...slopeHits, ...hydroHits, ...springHits, ...summerHits];
         const merged = findConsensus(rawCombined);
         
-        // Cross-reference with AIM data and perform Target Reconciliation
         const newScanResults = merged.map(c => {
             for (const aim of (aimGeoJSON.features || [])) {
                 const aimProps = (aim as any).properties;
                 const coords = (aim as any).geometry?.coordinates;
                 if (!coords) continue;
-                
                 let isMatch = false;
                 if ((aim as any).geometry.type === 'Polygon' || (aim as any).geometry.type === 'MultiPolygon') {
                     const rings = (aim as any).geometry.type === 'Polygon' ? [coords] : coords;
                     for (const ring of rings) { if (isPointInPolygon(c.center[1], c.center[0], ring)) { isMatch = true; break; } }
-                } else if ((aim as any).geometry.type === 'Point') {
-                    if (getDistance(c.center, coords) < 50) isMatch = true;
-                }
+                } else if ((aim as any).geometry.type === 'Point' && getDistance(c.center, coords) < 50) isMatch = true;
 
                 if (isMatch) {
                     if (!c.sources.includes('historic')) c.sources.push('historic');
@@ -1726,18 +1687,13 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
             return c;
         });
 
-        // FRESH SCAN: Start with empty list for each execution to prevent over-accumulation
         const updatedFeatures: Cluster[] = [];
-        
         newScanResults.forEach(newHit => {
             let anchored = false;
             for (let i = 0; i < updatedFeatures.length; i++) {
                 if (getDistance(newHit.center, updatedFeatures[i].center) < 15) {
                     newHit.sources.forEach(s => { if (!updatedFeatures[i].sources.includes(s)) updatedFeatures[i].sources.push(s); });
-                    updatedFeatures[i].rescanCount = (updatedFeatures[i].rescanCount || 1) + 1;
-                    updatedFeatures[i].persistenceScore = Math.min(100, (updatedFeatures[i].persistenceScore || 0) + 10);
                     updatedFeatures[i].confidence = newHit.confidence === 'High' ? 'High' : updatedFeatures[i].confidence;
-                    if (newHit.aimInfo) updatedFeatures[i].aimInfo = newHit.aimInfo;
                     anchored = true;
                     break;
                 }
@@ -1745,43 +1701,28 @@ export default function FieldGuide({ projectId }: { projectId: string }) {
             if (!anchored) updatedFeatures.push(newHit);
         });
 
-        // RUN MODERN DISTURBANCE SUPPRESSION (Suppress drainage, ploughing, etc.)
         const suppressed = suppressDisturbance(updatedFeatures);
-
         const contextualized = analyzeContext(suppressed, routes)
             .sort((a, b) => b.findPotential - a.findPotential)
             .map((c, i) => ({ ...c, number: i + 1 }));
-const tacticalHotspots = generateHotspots(contextualized, pasFinds, monumentPoints, targetPeriod, permissions, fields, routes);
 
-// SYNC STATE
-setDetectedFeatures(contextualized);
-setHotspots(tacticalHotspots);
+        const tacticalHotspots = generateHotspots(contextualized, pasFinds, monumentPoints, targetPeriod, permissions, fields, routes);
+        setDetectedFeatures(contextualized);
+        setHotspots(tacticalHotspots);
 
-// --- "START HERE" SYSTEM ---
-if (tacticalHotspots.length > 0) {
-    // Select highest scoring hotspot as the suggested starting point
-    const best = tacticalHotspots[0];
-    setStartHereId(best.id);
+        if (!hasScanned && tacticalHotspots.length > 0) {
+            setHasScanned(true);
+            setShowSuggestion(true);
+            setSelectedHotspotId(tacticalHotspots[0].id);
+            mapRef.current?.fitBounds(tacticalHotspots[0].bounds as any, { padding: 40 });
+        }
+        addLog(`Scan Complete. ${tacticalHotspots.length} Hotspots identified.`);
+    } catch (e) { addLog("Engine Error."); console.error(e); }
+    
+    setAnalyzing(false);
+    setScanStatus("");
+  };
 
-    // 10-20 second "Aha!" moment goal:
-    // Wait slightly for map markers to settle, then suggest
-    setTimeout(() => {
-        setShowStartHere(true);
-        // Gentle zoom-in (not jarring)
-        mapRef.current?.fitBounds(best.bounds as any, { padding: 100, duration: 2500 });
-    }, 1500);
-}
-
-// Auto-load PAS for the new scan area
-// loadPASFinds(); // REMOVED: Only trigger when manually pressed
-
-setAnalyzing(false);
-
-addLog(`Scan Complete. ${tacticalHotspots.length} Hotspots identified.`);
-} catch (e) { addLog("Engine Error."); console.error(e); }
-
-setAnalyzing(false);
-};
   return (
     <div className="flex flex-col h-[calc(100vh-140px)] landscape:h-[calc(100vh-100px)] sm:h-[calc(100vh-220px)] bg-slate-950 rounded-3xl overflow-hidden border border-slate-800 shadow-2xl relative">
       <header className="bg-slate-900/80 border-b border-white/5 shrink-0 z-50 backdrop-blur-md">
@@ -1860,54 +1801,6 @@ setAnalyzing(false);
       <div className="flex flex-1 overflow-hidden relative">
         <div className="flex-1 relative bg-slate-900">
             <div ref={mapContainerRef} className="absolute inset-0" />
-
-            {/* "START HERE" SYSTEM OVERLAY */}
-            {showStartHere && startHereId && hotspots.find(h => h.id === startHereId) && (
-                <div className="absolute bottom-24 left-4 right-4 sm:left-auto sm:right-4 sm:w-80 z-[70] animate-in fade-in slide-in-from-bottom-4 duration-700">
-                    <div className="bg-slate-900/95 backdrop-blur-xl border-2 border-amber-500/50 rounded-2xl p-4 shadow-[0_20px_50px_rgba(0,0,0,0.5),0_0_20px_rgba(245,158,11,0.2)] relative overflow-hidden">
-                        {/* Subtle background glow */}
-                        <div className="absolute -top-10 -right-10 w-32 h-32 bg-amber-500/10 rounded-full blur-3xl" />
-                        
-                        <div className="relative">
-                            <p className="text-[10px] font-black text-amber-500 uppercase tracking-[0.2em] mb-1">FindSpot Suggestion</p>
-                            <h3 className="text-xl font-black text-white uppercase tracking-tighter leading-tight mb-1">Start Here</h3>
-                            
-                            {hotspots.filter(h => h.id === startHereId).map(h => (
-                                <div key={h.id}>
-                                    <p className="text-slate-300 text-sm font-medium leading-snug mb-4">
-                                        {getStartHereExplanation(h)}
-                                    </p>
-                                    
-                                    <div className="flex flex-col gap-2">
-                                        <button 
-                                            onClick={() => {
-                                                const params = new URLSearchParams();
-                                                params.set("lat", h.center[1].toString());
-                                                params.set("lon", h.center[0].toString());
-                                                navigate(`/find?${params.toString()}`);
-                                            }}
-                                            className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg shadow-amber-500/20"
-                                        >
-                                            Begin session here 
-                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                                                <line x1="5" y1="12" x2="19" y2="12"></line>
-                                                <polyline points="12 5 19 12 12 19"></polyline>
-                                            </svg>
-                                        </button>
-                                        
-                                        <button 
-                                            onClick={() => setShowStartHere(false)}
-                                            className="w-full py-2 text-[10px] font-black text-slate-500 uppercase tracking-widest hover:text-slate-300 transition-colors"
-                                        >
-                                            Explore map instead
-                                        </button>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-            )}
             
             {/* Map Layer Toggle */}
             <div className="absolute top-4 right-4 z-[60] flex flex-col gap-2">
@@ -1935,7 +1828,7 @@ setAnalyzing(false);
             </div>
 
             {/* Floating Alerts */}
-            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[100] flex flex-col gap-2 items-center pointer-events-none w-[90%] max-w-sm">
+            <div className="absolute top-12 left-1/2 -translate-x-1/2 z-[100] flex flex-col gap-2 items-center pointer-events-none w-[90%] max-w-sm">
                 {heritageCount > 0 && (
                     <div className="bg-red-600 text-white px-4 py-1.5 rounded-full text-[8px] sm:text-[10px] font-black tracking-widest uppercase shadow-2xl border border-white/20 animate-bounce">
                         ⛔ Scheduled Monument
@@ -1949,7 +1842,7 @@ setAnalyzing(false);
                 {analyzing && (
                     <div className="bg-slate-900/90 text-emerald-400 px-6 py-3 rounded-2xl text-[10px] font-black tracking-[0.2em] uppercase shadow-2xl border border-emerald-500/50 animate-pulse flex items-center gap-3 backdrop-blur-xl">
                         <div className="w-2 h-2 bg-emerald-500 rounded-full animate-ping" />
-                        Scanning Terrain...
+                        {scanStatus || 'Scanning Terrain...'}
                     </div>
                 )}
             </div>
@@ -1966,6 +1859,7 @@ setAnalyzing(false);
                             <button
                                 key={h.id}
                                 onClick={() => {
+                                    setShowSuggestion(false);
                                     setSelectedHotspotId(h.id === selectedHotspotId ? null : h.id);
                                     if (h.id !== selectedHotspotId) mapRef.current?.fitBounds(h.bounds as any, { padding: 40 });
                                 }}
@@ -1985,14 +1879,15 @@ setAnalyzing(false);
             {selectedHotspotId && (
                 <div className="absolute bottom-6 left-4 right-4 z-[100] lg:hidden animate-in slide-in-from-bottom-4 duration-300">
                     {hotspots.filter(h => h.id === selectedHotspotId).map(h => (
-                        <div key={h.id} className={`p-5 rounded-3xl border shadow-2xl transition-all ${
-                            h.score >= 80 ? 'bg-amber-600 border-yellow-300 text-white shadow-[0_0_40px_rgba(217,119,6,0.6)]' :
-                            h.score >= 45 ? 'bg-emerald-600 border-emerald-400 text-white' :
-                            'bg-slate-800 border-white/20 text-white'
+                        <div key={h.id} className={`p-5 rounded-3xl border-2 shadow-2xl backdrop-blur-xl transition-all ${
+                            h.score >= 80 ? 'bg-slate-900/95 border-amber-500/50 shadow-[0_0_40px_rgba(245,158,11,0.2)]' :
+                            h.score >= 45 ? 'bg-slate-900/95 border-emerald-500/50' :
+                            'bg-slate-900/95 border-white/20'
                         }`}>
                             <div className="flex justify-between items-start mb-4">
                                 <div>
-                                    <div className="flex items-center gap-2 mb-1">
+                                    <h3 className="text-lg font-black uppercase tracking-tight leading-none mb-2">Hotspot</h3>
+                                    <div className="flex items-center gap-2">
                                         <div className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest ${
                                             h.score >= 80 ? 'bg-red-500 text-white' : 
                                             h.score >= 65 ? 'bg-orange-500 text-white' :
@@ -2007,15 +1902,20 @@ setAnalyzing(false);
                                             {h.confidence} Confidence
                                         </div>
                                     </div>
-                                    <h3 className="text-lg font-black uppercase tracking-tight leading-none">{h.type} — {h.score}%</h3>
-                                    </div>
+                                </div>
+                                <div className="flex items-center gap-4">
+                                    {showSuggestion && (
+                                        <span className="text-emerald-400 text-[10px] font-black animate-pulse tracking-widest">DETECT HERE</span>
+                                    )}
+                                    <span className="text-xl font-black text-white/90">{h.score}%</span>
                                     <button onClick={() => setSelectedHotspotId(null)} className="bg-black/20 hover:bg-black/40 text-white rounded-full p-2 transition-colors border border-white/10">
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                                        <line x1="18" y1="6" x2="6" y2="18"></line>
                                        <line x1="6" y1="6" x2="18" y2="18"></line>
                                     </svg>
                                     </button>
-                                    </div>
+                                </div>
+                            </div>
 
                                     {h.isHighConfidenceCrossing && (
                                     <div className="bg-blue-600/40 p-2 rounded-2xl border border-blue-400 mb-4 animate-pulse">
@@ -2453,26 +2353,34 @@ setAnalyzing(false);
                         <div 
                             key={h.id} 
                             onClick={() => {
+                                setShowSuggestion(false);
                                 setSelectedHotspotId(h.id);
                                 mapRef.current?.fitBounds(h.bounds as any, { padding: 40 });
                             }}
-                            className={`p-4 rounded-2xl border cursor-pointer transition-all active:scale-[0.98] ${
+                            className={`p-4 rounded-2xl border-2 cursor-pointer transition-all active:scale-[0.98] ${
                                 selectedHotspotId === h.id ? 'bg-white/10 border-white ring-4 ring-white/10' :
-                                h.score >= 80 ? 'bg-red-500/5 border-red-500/20 hover:border-red-500/40' :
-                                h.score >= 45 ? 'bg-emerald-500/5 border-emerald-500/20 hover:border-emerald-500/40' :
-                                'bg-white/5 border-white/10 hover:border-white/20'
+                                h.score >= 80 ? 'bg-slate-900/40 border-amber-500/30 hover:border-amber-500/60 shadow-[0_0_15px_rgba(245,158,11,0.05)]' :
+                                h.score >= 45 ? 'bg-slate-900/40 border-emerald-500/30 hover:border-emerald-500/60' :
+                                'bg-slate-900/40 border-white/10 hover:border-white/20'
                             }`}
                         >
                             <div className="flex justify-between items-start mb-3">
                                 <div>
-                                    <h3 className={`text-xs font-black uppercase tracking-tight ${selectedHotspotId === h.id ? 'text-white' : 'text-slate-200'}`}>{h.type}</h3>
-                                    <span className="text-[10px] font-black text-emerald-500 uppercase tracking-[0.1em]">{h.score}% Probability</span>
+                                    <h3 className={`text-xs font-black uppercase tracking-tight ${selectedHotspotId === h.id ? 'text-white' : 'text-slate-200'}`}>Hotspot</h3>
                                 </div>
-                                <div className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest ${
-                                    h.confidence === 'Elite' ? 'bg-amber-500 text-black shadow-[0_0_10px_rgba(245,158,11,0.5)]' : 
-                                    h.confidence === 'Strong' ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-300'
-                                }`}>{h.confidence} Confidence</div>
+                                <div className="flex flex-col items-end gap-1">
+                                    <div className="flex items-center gap-2">
+                                        {showSuggestion && h.number === 1 && (
+                                            <span className="text-[7px] font-black text-emerald-400 animate-pulse tracking-widest">DETECT HERE</span>
+                                        )}
+                                        <span className="text-[10px] font-black text-emerald-500 tracking-tight">{h.score}%</span>
+                                    </div>
+                                    <div className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest ${
+                                        h.confidence === 'Elite' ? 'bg-amber-500 text-black shadow-[0_0_10px_rgba(245,158,11,0.5)]' : 
+                                        h.confidence === 'Strong' ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-300'
+                                    }`}>{h.confidence} Confidence</div>
                                 </div>
+                            </div>
 
                                 {h.isHighConfidenceCrossing && (
                                 <div className="bg-blue-600/40 p-1.5 rounded-xl border border-blue-400 mb-3 animate-pulse">

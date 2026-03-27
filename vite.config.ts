@@ -11,7 +11,7 @@ export default defineConfig({
       includeAssets: ['logo.svg'],
       manifest: {
         name: 'FindSpot Testing',
-        short_name: 'FindSpot',
+        short_name: 'FindSpot (T)',
         description: 'Offline metal detecting find recording',
         theme_color: "#10b981",
         background_color: "#ffffff",
